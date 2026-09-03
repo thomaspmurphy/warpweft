@@ -5,9 +5,9 @@ defmodule Warpweft.Generate do
   The whole per-token computation — forward pass, temperature, top-k
   masking, Gumbel-max sampling — is one jitted function over a
   *fixed-shape* `{1, block_size}` buffer, so XLA compiles it exactly once
-  and every subsequent token reuses the compiled program. (The reference
-  livebook re-ran `Axon.predict` on a growing sequence: a fresh
-  compilation per shape and a full re-dispatch per token.)
+  and every subsequent token reuses the compiled program. Running the
+  forward pass on a growing sequence instead would force a fresh
+  compilation at every length.
 
   The context buffer is right-padded with zeros and tracked by a scalar
   `len`. The causal mask guarantees positions >= len cannot influence the

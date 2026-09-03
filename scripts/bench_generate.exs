@@ -1,6 +1,6 @@
 # Benchmarks the compile-once fixed-shape generation step against the
-# naive approach the reference livebook used (re-running the forward pass
-# on a growing sequence, forcing a fresh XLA compilation per length).
+# naive approach: re-running the forward pass on a growing sequence,
+# which forces a fresh XLA compilation at every length.
 #
 #     mix run scripts/bench_generate.exs [run_dir]
 

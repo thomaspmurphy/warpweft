@@ -6,8 +6,7 @@ defmodule Warpweft.Data.Batches do
   flat corpus tensor: random offsets broadcast against an iota give every
   window's absolute indices, and slicing off the first/last column yields
   the inputs and next-token targets. Fixed shapes mean XLA compiles this
-  exactly once. (The reference livebook did this on the host with
-  `Nx.to_list` + `Enum.map` + `Nx.stack` — a round-trip per batch.)
+  exactly once, and nothing crosses back to the host per batch.
   """
 
   @doc """
@@ -35,8 +34,7 @@ defmodule Warpweft.Data.Batches do
   Infinite stream of `{x, y, dropout_key}` batches from a jitted sampler.
 
   Each element also carries a fresh PRNG key for that step's dropout, so
-  no two steps ever reuse a dropout mask (the reference livebook reused a
-  constant key, i.e. the same mask every step).
+  no two steps ever reuse a dropout mask.
   """
   def stream(data, seed, batch, block) do
     sampler = Nx.Defn.jit(&sample(&1, &2, batch, block))

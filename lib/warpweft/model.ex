@@ -17,9 +17,9 @@ defmodule Warpweft.Model do
   into a single fused XLA program. All architecture variants are decided
   at trace time from the config, so there is no runtime branching.
 
-  Initialization follows nanoGPT: normal(0, 0.02) everywhere, with the
-  residual output projections scaled down by 1/sqrt(2 * n_layer) so the
-  residual stream variance stays stable with depth.
+  Initialization is normal(0, 0.02) everywhere, with the residual output
+  projections scaled down by 1/sqrt(2 * n_layer) so the residual stream
+  variance stays stable with depth.
   """
 
   alias Warpweft.Config
