@@ -33,7 +33,7 @@ mix wf.train --preset tinystories_base
 
 | Piece          | Where                              | Notes                                                                         |
 | -------------- | ---------------------------------- | ----------------------------------------------------------------------------- |
-| Byte-level BPE | `lib/warpweft/tokenizer/bpe.ex`    | trained from scratch; any binary round-trips exactly                          |
+| Byte-level BPE | `lib/warpweft/tokenizer/bpe.ex`    | trained from scratch; any binary round-trips exactly; hybrid ASCII/regex pre-tokenizer |
 | Data pipeline  | `lib/warpweft/data/`               | corpus -> u16 token file -> one device tensor; batches sampled fully on device |
 | Model          | `lib/warpweft/model.ex` + `model/` | params are a visible nested map; forward pass is readable top-to-bottom Nx    |
 | Attention      | `lib/warpweft/model/attention.ex`  | fused causal multi-head self-attention                                        |
@@ -117,9 +117,11 @@ RMSNorm + SwiGLU + tied):
   recompile-per-length alternative costs 97 ms/token even at tiny context
   sizes and gets worse as the sequence grows — a **≥16× speedup**
   (`scripts/bench_generate.exs`)
-- **Tokenizer**: 768 merges learned in 9s; encodes Shakespeare at 2.44
-  bytes/token. The merge search is ~97% of that time; pre-tokenization is
-  ~3%
+- **Tokenizer**: 768 merges learned in ~6s; encodes Shakespeare at 2.44
+  bytes/token. Pre-tokenization runs at ~32 MB/s (1.1 MB in 29 ms, the
+  22 MB corpus in 710 ms), so `encode` over the whole 22 MB corpus takes
+  1.2s. Learning the merges dominates training time, and is where to look
+  next for a speedup
 
 Sample after 14 minutes of CPU training (prompt `ROMEO:`):
 

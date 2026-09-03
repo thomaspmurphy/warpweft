@@ -72,6 +72,113 @@ defmodule Warpweft.Tokenizer.BPETest do
     end
   end
 
+  describe "chunks/1 (pre-tokenization)" do
+    # The regex is the specification; the fast paths in BPE.chunks/1 are an
+    # optimization that must agree with it byte-for-byte. This test owns the
+    # reference copy on purpose: changing the spec should break it.
+    @spec_regex ~r/ ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+/u
+
+    defp reference(text), do: @spec_regex |> Regex.scan(text) |> Enum.map(&hd/1)
+
+    defp assert_matches_spec(text) do
+      assert BPE.chunks(text) == reference(text),
+             "chunking diverged from the spec regex for #{inspect(text, limit: 20)}"
+    end
+
+    test "splits words, numbers, punctuation and whitespace" do
+      assert BPE.chunks("First Citizen:\nBefore we go") ==
+               ["First", " Citizen", ":", "\n", "Before", " we", " go"]
+    end
+
+    test "glues a single leading space, but never a longer whitespace run" do
+      assert BPE.chunks("a the") == ["a", " the"]
+      assert BPE.chunks("a  the") == ["a", "  ", "the"]
+      assert BPE.chunks("a\nthe") == ["a", "\n", "the"]
+      assert BPE.chunks("a \nthe") == ["a", " \n", "the"]
+    end
+
+    test "agrees with the spec regex on tricky ASCII edge cases" do
+      for text <- [
+            "",
+            " ",
+            "  ",
+            "\n",
+            "\t\t",
+            "a",
+            " a",
+            "a ",
+            "42",
+            " 42",
+            "abc123",
+            "123abc",
+            "...",
+            " ...",
+            "!?!",
+            "don't",
+            "e.g. 3.14",
+            "a\v\fb",
+            "ALL CAPS and mixed",
+            "trailing space ",
+            "\nleading newline",
+            String.duplicate("word ", 100)
+          ] do
+        assert_matches_spec(text)
+      end
+    end
+
+    test "agrees with the spec regex on non-ASCII text" do
+      for text <- [
+            "Zürich",
+            " Zürich",
+            "naïve café",
+            "日本語のテキスト",
+            "emoji 🎉 here",
+            "mixed Zürich and plain ascii words",
+            "número 42",
+            "a b"
+          ] do
+        assert_matches_spec(text)
+      end
+    end
+
+    test "agrees with the spec regex across slice boundaries" do
+      # Slices are cut every 64 KB, so exercise inputs far larger than one
+      # slice with non-ASCII scattered near the boundaries.
+      filler = String.duplicate("the quick brown fox jumps over the lazy dog. ", 4_000)
+
+      assert_matches_spec(filler)
+      assert_matches_spec(filler <> "Zürich " <> filler)
+      assert_matches_spec(String.duplicate("café ", 20_000))
+    end
+
+    test "agrees with the spec regex on the real corpus" do
+      path = "data/raw/shakespeare.txt"
+
+      if File.exists?(path) do
+        assert_matches_spec(File.read!(path))
+      end
+    end
+
+    property "agrees with the spec regex for arbitrary valid strings" do
+      check all(s <- StreamData.string(:utf8, max_length: 300)) do
+        assert_matches_spec(s)
+      end
+    end
+
+    test "handles invalid UTF-8 byte-by-byte instead of raising" do
+      # The spec regex itself raises on invalid UTF-8, so there is nothing
+      # to differentially compare against; assert the round-trip guarantee.
+      assert BPE.chunks(<<72, 105, 128, 33>>) |> IO.iodata_to_binary() == <<72, 105, 128, 33>>
+      assert BPE.chunks(<<0xC3>>) |> IO.iodata_to_binary() == <<0xC3>>
+    end
+
+    property "chunks always concatenate back to the input" do
+      check all(s <- StreamData.binary(max_length: 300)) do
+        assert s |> BPE.chunks() |> IO.iodata_to_binary() == s
+      end
+    end
+  end
+
   describe "Store" do
     @tag :tmp_dir
     test "save/load round-trips the tokenizer", %{tmp_dir: dir} do

@@ -19,8 +19,13 @@ defmodule Warpweft.Tokenizer.BPE do
 
   @byte_alphabet_size 256
 
-  # GPT-2-ish pre-split: leading-space words, numbers, punctuation runs, whitespace.
+  # Pre-split specification: leading-space words, numbers, punctuation
+  # runs, whitespace. See `chunks/1` for how it is applied.
   @chunk_regex ~r/ ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+/u
+
+  # Slices are small enough that their chunk lists die young rather than
+  # being promoted, and large enough to amortize the per-slice overhead.
+  @slice_target 65_536
 
   @doc """
   Trains a tokenizer on `text` up to `vocab_size` total tokens.
@@ -43,8 +48,11 @@ defmodule Warpweft.Tokenizer.BPE do
     chunk_freqs =
       text
       |> strip_specials(special_tokens)
-      |> Enum.flat_map(&chunks/1)
-      |> Enum.frequencies_by(&:binary.bin_to_list/1)
+      |> Enum.reduce(%{}, fn part, counts ->
+        reduce_chunks(part, counts, fn chunk, counts ->
+          Map.update(counts, :binary.bin_to_list(chunk), 1, &(&1 + 1))
+        end)
+      end)
       |> Map.to_list()
 
     merges = learn_merges(chunk_freqs, n_merges, log_every)
@@ -106,9 +114,7 @@ defmodule Warpweft.Tokenizer.BPE do
           {[[bpe.special_tokens[tok]] | acc], memo}
 
         {:text, part}, {acc, memo} ->
-          part
-          |> chunks()
-          |> Enum.reduce({acc, memo}, fn chunk, {acc, memo} ->
+          reduce_chunks(part, {acc, memo}, fn chunk, {acc, memo} ->
             case memo do
               %{^chunk => ids} ->
                 {[ids | acc], memo}
@@ -130,14 +136,48 @@ defmodule Warpweft.Tokenizer.BPE do
 
   # -- chunking ----------------------------------------------------------------
 
-  # Splits a binary into BPE work units. Valid UTF-8 goes through the
-  # GPT-2-style regex; invalid bytes each become their own single-byte chunk
-  # (preserving the guarantee that any binary round-trips).
-  defp chunks(text) do
-    if String.valid?(text) do
-      @chunk_regex |> Regex.scan(text) |> Enum.map(&hd/1)
+  @doc """
+  Splits a binary into pre-tokenization work units.
+
+  This is the step before BPE proper: text is cut into words, numbers,
+  punctuation runs and whitespace runs, and merges are only ever learned
+  or applied *within* a unit. `@chunk_regex` is the specification of that
+  split; everything below is an optimization that must agree with it
+  byte-for-byte (see the differential test in `bpe_test.exs`).
+
+  Three things make this fast:
+
+    * the input is cut into slices at safe boundaries, so the
+      intermediate lists stay small and short-lived rather than
+      materializing every chunk in the corpus at once
+    * pure-ASCII slices (the vast majority of real text) are scanned by
+      binary pattern matching, ~7x faster than the regex
+    * only slices containing non-ASCII codepoints pay for the regex,
+      which keeps the Unicode letter/number categories exact
+
+  Invalid UTF-8 is handled byte-by-byte, so any binary round-trips.
+  """
+  def chunks(text) do
+    text |> reduce_chunks([], fn chunk, acc -> [chunk | acc] end) |> :lists.reverse()
+  end
+
+  # Streams chunks slice by slice. Nothing ever holds more than one
+  # slice's worth of chunks.
+  defp reduce_chunks(text, acc, fun) do
+    text
+    |> slices()
+    |> Enum.reduce(acc, fn slice, acc ->
+      slice |> chunks_of_slice() |> Enum.reduce(acc, fun)
+    end)
+  end
+
+  defp chunks_of_slice(slice), do: scan(slice, 0, [])
+
+  defp regex_chunks(slice) do
+    if String.valid?(slice) do
+      @chunk_regex |> Regex.scan(slice) |> Enum.map(&hd/1)
     else
-      chunks_with_invalid_bytes(text)
+      chunks_with_invalid_bytes(slice)
     end
   end
 
@@ -146,13 +186,121 @@ defmodule Warpweft.Tokenizer.BPE do
   defp chunks_with_invalid_bytes(bin) do
     case :unicode.characters_to_binary(bin) do
       valid when is_binary(valid) ->
-        chunks(valid)
+        chunks_of_slice(valid)
 
       {kind, valid, rest} when kind in [:error, :incomplete] ->
         <<bad_byte, rest::binary>> = rest
-        chunks(valid) ++ [<<bad_byte>>] ++ chunks_with_invalid_bytes(rest)
+        chunks_of_slice(valid) ++ [<<bad_byte>>] ++ chunks_with_invalid_bytes(rest)
     end
   end
+
+  # -- slicing -----------------------------------------------------------------
+
+  defp slices(text) when byte_size(text) <= @slice_target, do: [text]
+  defp slices(text), do: slices(text, 0, [])
+
+  defp slices(text, start, acc) do
+    size = byte_size(text)
+    rest = size - start
+
+    if rest <= @slice_target do
+      :lists.reverse([:binary.part(text, start, rest) | acc])
+    else
+      case safe_split(text, start + @slice_target, size) do
+        nil ->
+          :lists.reverse([:binary.part(text, start, rest) | acc])
+
+        stop ->
+          slices(text, stop, [:binary.part(text, start, stop - start) | acc])
+      end
+    end
+  end
+
+  # A chunk can only span a position when both sides share a character
+  # class, or when a single literal space is glued to the run after it.
+  # So the first whitespace byte that follows a non-whitespace byte is
+  # always a boundary no chunk can straddle.
+  defp safe_split(bin, from, size) when from < size do
+    if ws?(:binary.at(bin, from)) and not ws?(:binary.at(bin, from - 1)) do
+      from
+    else
+      safe_split(bin, from + 1, size)
+    end
+  end
+
+  defp safe_split(_bin, _from, _size), do: nil
+
+  # -- ascii fast path ---------------------------------------------------------
+
+  # Scans a slice with binary pattern matching, which handles ASCII only.
+  # Real text is >99% ASCII but non-ASCII tends to be sprinkled throughout
+  # it, so a run containing any byte >= 128 escapes to the regex on its own
+  # — just far enough to reach the next boundary no chunk can straddle —
+  # and then the fast path resumes. Escaping the whole slice instead would
+  # mean a single curly quote taxes the other 64 KB around it.
+  #
+  # `i` is always at a chunk boundary, which is what makes handing an
+  # isolated span to the regex give the same answer as the regex would give
+  # for that span in context.
+  defp scan(bin, i, acc) when i >= byte_size(bin), do: :lists.reverse(acc)
+
+  defp scan(bin, i, acc) do
+    size = byte_size(bin)
+    first = :binary.at(bin, i)
+
+    if first >= 128 do
+      escape(bin, i, size, acc)
+    else
+      next = if i + 1 < size, do: :binary.at(bin, i + 1)
+
+      # The regex's " ?" prefix: one literal space glued to the following
+      # run. It only applies to 0x20 (not \n or \t) followed by a
+      # non-whitespace character, because otherwise "\s+" claims the whole
+      # whitespace run first.
+      {run_start, cls} =
+        if first == 0x20 and is_integer(next) and next < 128 and not ws?(next) do
+          {i + 1, class(next)}
+        else
+          {i, class(first)}
+        end
+
+      case run_end(bin, run_start, cls, size) do
+        :non_ascii -> escape(bin, i, size, acc)
+        stop -> scan(bin, stop, [:binary.part(bin, i, stop - i) | acc])
+      end
+    end
+  end
+
+  defp escape(bin, i, size, acc) do
+    stop =
+      case safe_split(bin, i + 1, size) do
+        nil -> size
+        boundary -> boundary
+      end
+
+    chunks = bin |> :binary.part(i, stop - i) |> regex_chunks()
+    scan(bin, stop, Enum.reverse(chunks, acc))
+  end
+
+  defp run_end(bin, i, cls, size) when i < size do
+    c = :binary.at(bin, i)
+
+    cond do
+      c >= 128 -> :non_ascii
+      class(c) == cls -> run_end(bin, i + 1, cls, size)
+      true -> i
+    end
+  end
+
+  defp run_end(_bin, i, _cls, _size), do: i
+
+  # PCRE's \s without PCRE_UCP is ASCII whitespace only.
+  defp ws?(c), do: c in [0x20, 0x09, 0x0A, 0x0B, 0x0C, 0x0D]
+
+  defp class(c) when c in ?a..?z or c in ?A..?Z, do: :letter
+  defp class(c) when c in ?0..?9, do: :digit
+  defp class(c) when c in [0x20, 0x09, 0x0A, 0x0B, 0x0C, 0x0D], do: :space
+  defp class(c) when c < 128, do: :other
 
   # -- training internals ----------------------------------------------------
 
