@@ -19,6 +19,7 @@ defmodule Warpweft.Generate do
   """
 
   alias Warpweft.{Checkpoint, Config, Model}
+  alias Warpweft.Model.Decode
   alias Warpweft.Tokenizer.{BPE, Store}
 
   @doc """
@@ -33,7 +34,16 @@ defmodule Warpweft.Generate do
     generate(params, bpe, config, prompt, opts)
   end
 
-  @doc "Generates text given params, a tokenizer, and a config."
+  @doc """
+  Generates text given params, a tokenizer, and a config.
+
+  Uses the KV-cache path when the prompt plus the requested tokens fit in
+  `block_size`, and the recomputing path otherwise (the cache cannot slide
+  its window — see `Warpweft.Model.Decode`). Both paths produce identical
+  output for the same seed, since the cached logits match the full forward
+  pass and the sampling stream is the same. Pass `cache: false` to force
+  the recomputing path.
+  """
   def generate(params, %BPE{} = bpe, %Config{} = cfg, prompt, opts \\ []) do
     max_new_tokens = Keyword.get(opts, :max_new_tokens, 200)
     seed = Keyword.get(opts, :seed, 1337)
@@ -42,11 +52,21 @@ defmodule Warpweft.Generate do
     prompt_ids = BPE.encode(bpe, prompt)
     eot = if stop_at_eot, do: bpe.special_tokens |> Map.values() |> List.first()
 
-    step = build_step(cfg, opts)
+    fits = length(prompt_ids) + max_new_tokens <= cfg.block_size
+    use_cache = Keyword.get(opts, :cache, true) and fits
 
-    new_ids = sample_loop(step, params, prompt_ids, cfg, max_new_tokens, seed, eot)
+    new_ids =
+      if use_cache do
+        cached_loop(params, prompt_ids, cfg, max_new_tokens, seed, eot, opts)
+      else
+        sample_loop(build_step(cfg, opts), params, prompt_ids, cfg, max_new_tokens, seed, eot)
+      end
+
     prompt <> BPE.decode(bpe, new_ids)
   end
+
+  @doc "Whether a prompt of `prompt_len` plus `n` new tokens can use the cache."
+  def cacheable?(%Config{} = cfg, prompt_len, n), do: prompt_len + n <= cfg.block_size
 
   @doc """
   Builds the jitted `(params, buffer, len, key) -> {token, key}` step.
@@ -82,6 +102,100 @@ defmodule Warpweft.Generate do
 
       {token, key}
     end)
+  end
+
+  @doc """
+  Builds the two jitted functions the cached path uses:
+  `decode.(params, token, cache, pos) -> {logits, cache}` and
+  `sample.(logits, key) -> {token, key}`.
+
+  Sampling is kept out of the decode function so the prompt can be
+  prefilled without consuming the PRNG stream, which is what makes the
+  cached path produce byte-identical output to the recomputing path.
+  """
+  def build_cached_fns(%Config{} = cfg, opts \\ []) do
+    temperature = Keyword.get(opts, :temperature, 0.8)
+    top_k = Keyword.get(opts, :top_k, 50)
+
+    decode = Nx.Defn.jit(fn params, token, cache, pos -> Decode.step(params, token, cache, pos, cfg) end)
+
+    sample =
+      Nx.Defn.jit(fn logits, key ->
+        {token, key} = sample_token(Nx.divide(logits, temperature), key, top_k)
+        {token, key}
+      end)
+
+    {decode, sample}
+  end
+
+  defp cached_loop(params, prompt_ids, cfg, max_new_tokens, seed, eot, opts) do
+    {decode, sample} = build_cached_fns(cfg, opts)
+
+    prompt_ids = Enum.take(prompt_ids, -cfg.block_size)
+    prompt_ids = if prompt_ids == [], do: [0], else: prompt_ids
+
+    # Prefill: run the prompt through the cache. No sampling here, so the
+    # random stream is untouched until the first generated token.
+    {logits, cache} =
+      prompt_ids
+      |> Enum.with_index()
+      |> Enum.reduce({nil, Decode.init_cache(cfg)}, fn {id, pos}, {_logits, cache} ->
+        decode.(params, Nx.tensor([[id]], type: :s32), cache, Nx.tensor(pos, type: :s32))
+      end)
+
+    state = %{
+      logits: logits,
+      cache: cache,
+      key: Nx.Random.key(seed),
+      pos: length(prompt_ids),
+      out: []
+    }
+
+    Enum.reduce_while(1..max_new_tokens, state, fn _i, state ->
+      {token_t, key} = sample.(state.logits, state.key)
+      token = Nx.to_number(token_t)
+      state = %{state | key: key, out: [token | state.out]}
+
+      cond do
+        token == eot ->
+          {:halt, state}
+
+        state.pos >= cfg.block_size ->
+          {:halt, state}
+
+        true ->
+          {logits, cache} =
+            decode.(
+              params,
+              Nx.reshape(token_t, {1, 1}) |> Nx.as_type(:s32),
+              state.cache,
+              Nx.tensor(state.pos, type: :s32)
+            )
+
+          {:cont, %{state | logits: logits, cache: cache, pos: state.pos + 1}}
+      end
+    end)
+    |> then(fn state -> Enum.reverse(state.out) end)
+  end
+
+  # Temperature-scaled top-k Gumbel-max sampling over {1, vocab} logits.
+  defp sample_token(logits, key, top_k) do
+    v = Nx.axis_size(logits, 1)
+
+    masked =
+      case top_k do
+        nil ->
+          logits
+
+        k ->
+          k = min(k, v)
+          {top_vals, _} = Nx.top_k(logits, k: k)
+          kth = Nx.slice(top_vals, [0, k - 1], [1, 1])
+          Nx.select(Nx.less(logits, kth), Nx.tensor(-1.0e9, type: Nx.type(logits)), logits)
+      end
+
+    {gumbel, key} = Nx.Random.gumbel(key, shape: {1, v})
+    {masked |> Nx.add(gumbel) |> Nx.argmax(axis: -1) |> Nx.reshape({}), key}
   end
 
   defp sample_loop(step, params, prompt_ids, cfg, max_new_tokens, seed, eot) do

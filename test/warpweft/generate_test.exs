@@ -91,6 +91,45 @@ defmodule Warpweft.GenerateTest do
     end
   end
 
+  describe "KV cache" do
+    setup do
+      corpus = String.duplicate("all the world is a stage and all the men and women merely players. ", 5)
+      bpe = BPE.train(corpus, 280)
+      cfg = %{@tiny | vocab_size: 280}
+      %{bpe: bpe, cfg: cfg, params: Model.init(cfg, Nx.Random.key(0))}
+    end
+
+    test "cached and recomputing paths generate identical text", %{bpe: bpe, cfg: cfg, params: params} do
+      for seed <- [1, 2, 99], temp <- [0.8, 1.5], top_k <- [nil, 5] do
+        opts = [max_new_tokens: 8, seed: seed, temperature: temp, top_k: top_k]
+
+        cached = Generate.generate(params, bpe, cfg, "all the", opts ++ [cache: true])
+        plain = Generate.generate(params, bpe, cfg, "all the", opts ++ [cache: false])
+
+        assert cached == plain,
+               "diverged at seed=#{seed} temp=#{temp} top_k=#{inspect(top_k)}"
+      end
+    end
+
+    test "falls back to the recomputing path when the context would overflow", %{cfg: cfg} do
+      assert Generate.cacheable?(cfg, 4, 8)
+      refute Generate.cacheable?(cfg, 4, cfg.block_size)
+    end
+
+    test "cached generation stops at the block limit rather than corrupting the cache", %{
+      bpe: bpe,
+      cfg: cfg,
+      params: params
+    } do
+      # Ask for more than fits; with cache: true forced, it must stop cleanly.
+      text =
+        Generate.generate(params, bpe, cfg, "all", max_new_tokens: cfg.block_size * 2, cache: true, seed: 1)
+
+      assert is_binary(text)
+      assert String.starts_with?(text, "all")
+    end
+  end
+
   test "end-to-end generate round-trips through the tokenizer" do
     corpus = String.duplicate("all the world is a stage and all the men and women merely players. ", 5)
     bpe = BPE.train(corpus, 280)

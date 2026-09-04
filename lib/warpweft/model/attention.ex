@@ -77,6 +77,76 @@ defmodule Warpweft.Model.Attention do
     if return_weights, do: {out, weights}, else: out
   end
 
+  @doc """
+  Attention for a single new position, against cached keys and values.
+
+  This is the whole point of a KV cache. In the full forward pass, every
+  generated token recomputes the keys and values for all preceding
+  positions, even though they cannot have changed — the causal mask means
+  position `p`'s key and value depend only on tokens up to `p`. Caching
+  them turns the per-token cost from O(context) projections and an
+  O(context^2) score matrix into one projection and an O(context) score
+  row.
+
+  `x` is `{1, 1, d}` (one position). `cache` holds `k` and `v` of shape
+  `{1, n_head, block_size, head_dim}`, and `pos` is the absolute position
+  being written. Returns `{output, updated_cache}`.
+  """
+  def cached_attention(x, params, cache, pos, opts) do
+    n_head = Keyword.fetch!(opts, :n_head)
+    rope = Keyword.get(opts, :rope)
+
+    {b, t, d} = Nx.shape(x)
+    head_dim = div(d, n_head)
+
+    qkv = Nx.dot(x, params["qkv"]["kernel"])
+    q = split_heads(Nx.slice_along_axis(qkv, 0, d, axis: -1), n_head, head_dim)
+    k = split_heads(Nx.slice_along_axis(qkv, d, d, axis: -1), n_head, head_dim)
+    v = split_heads(Nx.slice_along_axis(qkv, 2 * d, d, axis: -1), n_head, head_dim)
+
+    # RoPE rotates by absolute position, so the caller passes the single
+    # row of the cos/sin tables for `pos`. Keys are cached *after*
+    # rotation, which is what keeps the cached scores identical to the
+    # full forward pass.
+    {q, k} =
+      case rope do
+        nil -> {q, k}
+        tables -> {RoPE.apply_rotary(q, tables), RoPE.apply_rotary(k, tables)}
+      end
+
+    keys = Nx.put_slice(cache["k"], [0, 0, pos, 0], k)
+    values = Nx.put_slice(cache["v"], [0, 0, pos, 0], v)
+
+    # {1, h, 1, hd} x {1, h, block, hd} -> {1, h, 1, block}
+    scores =
+      q
+      |> Nx.dot([3], [0, 1], keys, [3], [0, 1])
+      |> Nx.multiply(1.0 / :math.sqrt(head_dim))
+
+    # Causal masking degenerates to "positions after pos are not written yet"
+    visible =
+      keys
+      |> Nx.axis_size(2)
+      |> then(&Nx.iota({&1}))
+      |> Nx.less_equal(pos)
+      |> Nx.broadcast(Nx.shape(scores))
+
+    weights =
+      visible
+      |> Nx.select(scores, Nx.tensor(-1.0e9, type: Nx.type(scores)))
+      |> Layers.softmax()
+
+    out =
+      weights
+      # {1, h, 1, block} x {1, h, block, hd} -> {1, h, 1, hd}
+      |> Nx.dot([3], [0, 1], values, [2], [0, 1])
+      |> Nx.transpose(axes: [0, 2, 1, 3])
+      |> Nx.reshape({b, t, d})
+      |> Nx.dot(params["proj"]["kernel"])
+
+    {out, %{"k" => keys, "v" => values}}
+  end
+
   defp split_heads(x, n_head, head_dim) do
     {b, t, _d} = Nx.shape(x)
 
