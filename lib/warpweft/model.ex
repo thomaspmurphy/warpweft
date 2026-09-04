@@ -112,9 +112,14 @@ defmodule Warpweft.Model do
 
   Pass `key: prng_key` to enable dropout (training); omit it for the
   inference path, where every dropout is traced away entirely.
+
+  Pass `collect_attention: true` to get `{logits, attentions}` instead of
+  bare logits, where `attentions` is a list of `{b, h, t, t}` tensors, one
+  per layer, in layer order. Used by `mix wf.attention`.
   """
   def forward(params, tokens, %Config{} = cfg, opts \\ []) do
     key = Keyword.get(opts, :key)
+    collect = Keyword.get(opts, :collect_attention, false)
     rate = if key, do: cfg.dropout, else: 0.0
     {_b, t} = Nx.shape(tokens)
 
@@ -131,39 +136,44 @@ defmodule Warpweft.Model do
     {emb_key, key} = split_key(key)
     x = maybe_dropout(x, emb_key, rate)
 
-    x =
-      Enum.reduce(0..(cfg.n_layer - 1), {x, key}, fn i, {x, key} ->
+    {x, _key, attentions} =
+      Enum.reduce(0..(cfg.n_layer - 1), {x, key, []}, fn i, {x, key, attns} ->
         {attn_key, key} = split_key(key)
         {mlp_key, key} = split_key(key)
         block = params["blocks"][Integer.to_string(i)]
 
         attn_in = Layers.norm(x, block["norm1"], cfg.norm)
 
-        x =
-          Nx.add(
-            x,
-            Attention.self_attention(attn_in, block["attn"],
-              n_head: cfg.n_head,
-              rope: rope,
-              dropout: rate,
-              key: attn_key
-            )
-          )
+        attn_opts = [n_head: cfg.n_head, rope: rope, dropout: rate, key: attn_key]
+
+        {attn_out, attns} =
+          if collect do
+            {out, weights} =
+              Attention.self_attention(attn_in, block["attn"], [return_weights: true] ++ attn_opts)
+
+            {out, [weights | attns]}
+          else
+            {Attention.self_attention(attn_in, block["attn"], attn_opts), attns}
+          end
+
+        x = Nx.add(x, attn_out)
 
         mlp_in = Layers.norm(x, block["norm2"], cfg.norm)
         x = Nx.add(x, Layers.mlp(mlp_in, block["mlp"], cfg.mlp, mlp_key, rate))
 
-        {x, key}
+        {x, key, attns}
       end)
-      |> then(fn {x, _key} -> x end)
 
     x = Layers.norm(x, params["final_norm"], cfg.norm)
 
-    if cfg.tie_embeddings do
-      Nx.dot(x, Nx.transpose(params["wte"]["kernel"]))
-    else
-      Nx.dot(x, params["lm_head"]["kernel"])
-    end
+    logits =
+      if cfg.tie_embeddings do
+        Nx.dot(x, Nx.transpose(params["wte"]["kernel"]))
+      else
+        Nx.dot(x, params["lm_head"]["kernel"])
+      end
+
+    if collect, do: {logits, Enum.reverse(attentions)}, else: logits
   end
 
   @doc "Number of parameters in a params map."

@@ -17,12 +17,16 @@ defmodule Warpweft.Model.Attention do
     * `:rope`    - `{cos, sin}` tables or `nil` (learned positions upstream)
     * `:dropout` - rate applied to attention weights and to the output
     * `:key`     - PRNG key when dropout is active, else `nil`
+    * `:return_weights` - also return the `{b, h, t, t}` attention
+      distribution, for inspection. Off by default so the training path is
+      untouched.
   """
   def self_attention(x, params, opts) do
     n_head = Keyword.fetch!(opts, :n_head)
     rope = Keyword.get(opts, :rope)
     rate = Keyword.get(opts, :dropout, 0.0)
     key = Keyword.get(opts, :key)
+    return_weights = Keyword.get(opts, :return_weights, false)
 
     {b, t, d} = Nx.shape(x)
     head_dim = div(d, n_head)
@@ -62,12 +66,15 @@ defmodule Warpweft.Model.Attention do
     # {b, h, t, t} x {b, h, t, hd} -> {b, h, t, hd}
     out = Nx.dot(weights, [3], [0, 1], v, [2], [0, 1])
 
-    out
-    # {b, h, t, hd} -> {b, t, h * hd}
-    |> Nx.transpose(axes: [0, 2, 1, 3])
-    |> Nx.reshape({b, t, d})
-    |> Nx.dot(params["proj"]["kernel"])
-    |> maybe_dropout(out_key, rate)
+    out =
+      out
+      # {b, h, t, hd} -> {b, t, h * hd}
+      |> Nx.transpose(axes: [0, 2, 1, 3])
+      |> Nx.reshape({b, t, d})
+      |> Nx.dot(params["proj"]["kernel"])
+      |> maybe_dropout(out_key, rate)
+
+    if return_weights, do: {out, weights}, else: out
   end
 
   defp split_heads(x, n_head, head_dim) do
