@@ -38,6 +38,14 @@ defmodule Warpweft.Config do
 
   @presets %{
     "shakespeare_small" => %{},
+
+    # Deliberately identical to shakespeare_small apart from the corpus and
+    # the vocabulary it forces, so the two runs isolate the effect of
+    # training data volume (410K vs 5.1M tokens) on the generalization gap.
+    "tinystories_small" => %{
+      corpus: "tinystories",
+      vocab_size: 4096
+    },
     "tinystories_base" => %{
       corpus: "tinystories",
       vocab_size: 4096,

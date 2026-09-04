@@ -9,6 +9,10 @@ Nothing is hidden behind a framework's model graph. The parameters are a
 plain nested map, the forward pass is readable top-to-bottom Nx, and the
 training step is four visible lines: forward, gradient, clip, update.
 
+**[docs/FINDINGS.md](docs/FINDINGS.md)** is the implementation log: every
+training run and why we ran it, what the measurements showed, and the
+mistakes worth remembering.
+
 ## Quick start
 
 ```sh
@@ -21,12 +25,20 @@ mix wf.train --preset shakespeare_small       # ~14 min on a modern CPU -> runs/
 mix wf.generate --prompt "ROMEO:" -n 300      # sample from the latest run
 ```
 
+Inspect what the trained model's attention heads learned:
+
+```sh
+mix wf.attention --prompt "First Citizen:"            # per-head statistics
+mix wf.attention --prompt "First Citizen:" --heatmaps # + shaded grids
+```
+
 TinyStories (richer English, 22 MB corpus, vocab 4096):
 
 ```sh
 mix wf.data --corpus tinystories
 mix wf.tokenizer.train --corpus tinystories --vocab 4096 --sample-mb 5
-mix wf.train --preset tinystories_base
+mix wf.train --preset tinystories_small   # same architecture as shakespeare_small
+mix wf.train --preset tinystories_base    # 12.2M params, ~8h on CPU
 ```
 
 ## What's in the box
@@ -40,7 +52,9 @@ mix wf.train --preset tinystories_base
 | RoPE           | `lib/warpweft/model/rope.ex`       | rotary positions, half-split style                                            |
 | Training       | `lib/warpweft/train.ex`            | hand-rolled loop: `value_and_grad` -> clip -> AdamW, one jitted step          |
 | LR schedule    | `lib/warpweft/schedule.ex`         | linear warmup + cosine decay                                                  |
-| Generation     | `lib/warpweft/generate.ex`         | compile-once fixed-shape sampling, Gumbel-max + top-k                         |
+| Generation     | `lib/warpweft/generate.ex`         | KV-cache decoding, Gumbel-max + top-k, compile-once fixed-shape fallback      |
+| KV cache       | `lib/warpweft/model/decode.ex`     | single-position forward pass; O(context) per token instead of O(context²)     |
+| Introspection  | `lib/warpweft/introspect.ex`       | per-head attention statistics and terminal heatmaps                           |
 | Checkpoints    | `lib/warpweft/checkpoint.ex`       | self-contained `runs/<timestamp>/` dirs, resume with `--resume`               |
 
 ## Architecture variants
@@ -93,12 +107,14 @@ single program, which is where most of the performance comes from.
 2. **One jitted training step.** Forward, `value_and_grad`, global-norm
    clip, and AdamW with its LR schedule all trace into a single function,
    compiled once and called `total_steps` times.
-3. **One jitted generation step.** The context lives in a fixed-shape
-   `{1, block}` right-padded buffer with a scalar length. Because the
-   causal mask makes positions past the length unreachable, the padding is
-   mathematically invisible — so sampling a token never changes the shape
-   and never triggers a recompile. Growing the sequence instead would cost
-   a fresh compilation at every length.
+3. **One jitted generation step.** Two layers of this. The KV cache means
+   each token computes one position's keys and values and reads the rest
+   from a buffer, rather than recomputing the whole context. Where the
+   cache can't be used — it cannot slide its window, because cached keys
+   were encoded at their original absolute positions — the fallback keeps
+   the context in a fixed-shape `{1, block}` right-padded buffer with a
+   scalar length. The causal mask makes the padding provably invisible, so
+   sampling never changes a shape and never triggers a recompile.
 4. **Batched, correct sampling.** Temperature, top-k masking
    (`Nx.top_k`), and the sample itself happen inside the compiled step.
    Sampling uses the Gumbel-max trick — `argmax(logits/T + gumbel)` _is_ a
@@ -113,10 +129,19 @@ RMSNorm + SwiGLU + tied):
 
 - **Training**: ~22K tokens/s; the full 5,000-step run takes ~14 min
   (final val loss ≈ 3.97, i.e. ~1.63 nats/byte at 2.44 bytes/token)
-- **Generation**: one 0.16s compilation, then **6 ms/token**. The
-  recompile-per-length alternative costs 97 ms/token even at tiny context
-  sizes and gets worse as the sequence grows — a **≥16× speedup**
-  (`scripts/bench_generate.exs`)
+- **Generation**, 100 tokens at block size 128
+  (`scripts/bench_generate.exs`):
+
+  | Strategy | ms/token |
+  |---|---|
+  | KV cache | **1.06** |
+  | Fixed-shape recompute | 7.21 |
+  | Naive growing-shape recompute | 99.58 |
+
+  The 14× from naive to fixed-shape is compilation (one XLA program
+  instead of one per sequence length); the further 6.8× from the KV cache
+  is arithmetic (stop recomputing keys and values that cannot change).
+  Both paths produce byte-identical output for a given seed.
 - **Tokenizer**: 768 merges learned in ~6s; encodes Shakespeare at 2.44
   bytes/token. Pre-tokenization runs at ~32 MB/s (1.1 MB in 29 ms, the
   22 MB corpus in 710 ms), so `encode` over the whole 22 MB corpus takes
@@ -170,6 +195,6 @@ The architecture is task-agnostic — only the tokenizer and data change:
   accuracy metrics instead of eyeballing prose
 - **Music** in ABC notation
 - **Code completion** on an Elixir corpus
-- **KV-cache decoding**: an additive `decode_step` reusing the same params
-  (the explicit-params design makes this a new module, not a rewrite)
 - **EMLX backend** (Apple Metal) once its training support matures
+- Further open questions are collected at the end of
+  [docs/FINDINGS.md](docs/FINDINGS.md)
