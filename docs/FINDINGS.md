@@ -41,7 +41,13 @@ Every run we did, in order, and what each was for.
 | 3 | **Shakespeare baseline** | `shakespeare_small`, 5,000 steps, 3.48M params | The main model: samples, attention analysis, generation benchmarks | Train 1.65 / **val 3.97**. Kept as `runs/20260903-081542` |
 | 4 | **Variant A/B sweep** | 8 combos × 750 steps | Decide which architectural choices actually matter | RoPE and SwiGLU win; norm choice irrelevant. ~24 min total |
 | 5 | Sizing probe | `tinystories_base`, 60 steps, 12.19M params | Check the big preset before committing | 5,400 tok/s → 20K steps would be **8.3 hours**. Rejected, discarded |
-| 6 | **TinyStories controlled** | `tinystories_small`, 5,000 steps | Isolate *data volume*: identical architecture to run 3, 12× the tokens | See "Data volume" below |
+| 6 | **TinyStories controlled** | `tinystories_small`, 5,000 steps, 4.26M params | Isolate *data volume*: identical architecture to run 3, 12× the tokens | Val **2.038**, train/val gap **0.09** vs Shakespeare's 2.32. `runs/20260904-173641` |
+
+Run 6 was killed by an external signal at step 4,500 of 5,000 and resumed
+from its checkpoint with `mix wf.train --resume`, which was the first real
+exercise of the resume path — it picked up at exactly step 4,500 and
+finished cleanly. Worth knowing that the feature works, since a 20-minute
+run getting interrupted at 90% is otherwise an expensive annoyance.
 
 Two of the six runs existed only to size a later run. That habit paid for
 itself immediately at run 5, where the preset we'd written into the plan
@@ -84,6 +90,73 @@ harmful, because it shrinks your token count for free.
 
 Generalizable lesson: pick the tokenizer against the constraint you're
 actually up against, and work out which that is before choosing.
+
+### Run 6 confirmed it: the gap collapsed
+
+Same architecture, same hyperparameters, same step count. Only the corpus
+changed (and the vocabulary it forces):
+
+| | Shakespeare (run 3) | TinyStories (run 6) |
+|---|---|---|
+| Training tokens | 410,727 | 5,104,650 |
+| Parameters | 3,475,712 | 4,262,144 |
+| Tokens per parameter | 0.118 | **1.20** |
+| Final train loss | ~1.65 | ~1.95 |
+| Final val loss | 3.975 | 2.038 |
+| **Train/val gap** | **2.32** | **0.09** |
+| Val trajectory at the end | **rising** | still falling |
+| Throughput | 22K tok/s | 17K tok/s |
+
+The generalization gap went from 2.32 nats to 0.09 — it essentially
+vanished. Validation loss decreased monotonically at every one of the
+twenty evaluations, so run 6 ends **undertrained** rather than overfit:
+the exact opposite regime, reached purely by feeding it more data. Run 3
+should have been stopped around step 4,500; run 6 would have kept
+improving past 5,000.
+
+Throughput dropped 22K → 17K tok/s, from the 4× larger vocabulary making
+the final logit projection more expensive (`batch × block × d × vocab`).
+
+Sample quality tracks the loss. Run 3 produced Shakespeare-flavoured word
+salad with correct-looking speaker labels. Run 6, prompt "Once upon a
+time":
+
+> Once upon a time, there was a big gray cat. The cat liked to sleep all
+> day long. One day, the cat would sleep all day. It felt ashamed.
+> The cat woke up and saw a little mouse. The mouse said, "Why are you
+> sad, little mouse?" The mouse said, "I am sad because I need to clean."
+
+Syntax, dialogue punctuation and register are essentially correct.
+Coherence fails at the semantic level — the mouse asks the mouse why it's
+sad — which is what a 4M-parameter model at 1.2 tokens/parameter should
+look like.
+
+### Comparing across tokenizers requires bits per byte
+
+The two val losses above, 3.975 and 2.038, are **not** comparable as
+absolute numbers, and the temptation to read the second as "twice as good"
+is the trap. A tokenizer packing more text into each token earns a higher
+per-token loss for identical predictive quality, so nats/token is
+meaningless across different vocabularies.
+
+Dividing that out (`Warpweft.Train.bits_per_byte/2`):
+
+| Run | bytes/token | val nats/token | **bits/byte** |
+|---|---|---|---|
+| Shakespeare, vocab 1024 | 2.444 | 3.975 | **2.346** |
+| TinyStories, vocab 4096 | 3.967 | 2.038 | **0.741** |
+
+The gap is even wider on a fair footing — but this still isn't a clean
+statement about model quality, because the *corpora* differ in intrinsic
+difficulty. TinyStories is deliberately simple English with a small
+conceptual vocabulary; Shakespeare is archaic verse. Some of that 3×
+is the task being easier, not the model being better. Isolating model
+quality would need both models trained on the *same* corpus with
+different tokenizers.
+
+Two confounds, one controlled: run 6 isolates data volume cleanly (the
+gap is a within-run measure, so tokenizer differences cancel), but says
+nothing rigorous about absolute quality.
 
 ### Which architecture choices matter (run 4)
 
@@ -399,10 +472,15 @@ Things that cost real debugging time.
   of `BPE.train`.
 - **Cache eviction / sliding for KV decoding**, which needs a
   relative-position scheme to be correct.
-- **Bits-per-byte evaluation.** Comparing a char-level model against a BPE
-  model is invalid in nats/token because the vocabularies differ; the
-  losses must be normalized to bits per byte. Worth building into the eval
-  code *before* we need it, since it's an easy trap.
+- **Report bits/byte during training, not after.** `bits_per_byte/2`
+  exists now, but the training loop still logs nats/token, so every run's
+  headline number is tokenizer-dependent. The loop should log both.
+- **Train run 6 longer.** It ended still improving, so the 5,000-step
+  budget — chosen for Shakespeare, which was overfitting by then — is now
+  the binding constraint rather than the data.
+- **Same corpus, two tokenizers.** The one comparison that would isolate
+  tokenizer quality from corpus difficulty, and the missing control in
+  the run-3/run-6 pair.
 - **Scaling-law sweep**: train several sizes, plot loss against
   parameters and compute. The cleanest way to see the data/parameter
   tradeoff we backed into empirically.

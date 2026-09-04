@@ -144,6 +144,22 @@ defmodule Warpweft.Train do
     {final.params, run_dir}
   end
 
+  @doc """
+  Converts a loss in nats per token into bits per byte.
+
+  Cross-entropy in nats/token is **not** comparable between models with
+  different vocabularies: a tokenizer that packs more text into each token
+  earns a higher per-token loss for identical predictive quality. Bits per
+  byte divides that out, and is the only fair way to compare a run against
+  one that used a different tokenizer.
+
+      iex> Warpweft.Train.bits_per_byte(2.0379, 3.968) |> Float.round(3)
+      0.741
+  """
+  def bits_per_byte(nats_per_token, bytes_per_token) do
+    nats_per_token / :math.log(2) / bytes_per_token
+  end
+
   @doc "Mean inference-mode loss over `eval_batches` random validation batches."
   def evaluate(eval_step, params, val_data, %Config{} = cfg) do
     Batches.stream(val_data, cfg.seed + 7919, cfg.batch_size, cfg.block_size)

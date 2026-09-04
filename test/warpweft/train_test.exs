@@ -3,6 +3,8 @@ defmodule Warpweft.TrainTest do
 
   alias Warpweft.{Config, Model, Train}
 
+  doctest Warpweft.Train
+
   @tiny %Config{
     vocab_size: 64,
     block_size: 16,

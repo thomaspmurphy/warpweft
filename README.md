@@ -148,7 +148,35 @@ RMSNorm + SwiGLU + tied):
   1.2s. Learning the merges dominates training time, and is where to look
   next for a speedup
 
-Sample after 14 minutes of CPU training (prompt `ROMEO:`):
+### Data volume beats every architecture choice we measured
+
+Same architecture, same hyperparameters, same 5,000 steps — only the
+corpus differs:
+
+| | Shakespeare (410K tokens) | TinyStories (5.1M tokens) |
+|---|---|---|
+| Tokens per parameter | 0.118 | 1.20 |
+| Final val loss | 3.975 | 2.038 |
+| **Train/val gap** | **2.32** | **0.09** |
+| Val at end of run | rising (overfitting) | still falling |
+
+The Shakespeare run memorizes: validation loss bottoms out at step 4,500
+and climbs. Feeding the identical model 12× more data collapses the
+generalization gap to almost nothing. Note that the two val losses are
+only comparable via bits/byte (2.346 vs 0.741) since the vocabularies
+differ — see [docs/FINDINGS.md](docs/FINDINGS.md) for why that matters and
+what it still doesn't prove.
+
+TinyStories sample after ~20 minutes of CPU training:
+
+```
+Once upon a time, there was a big gray cat. The cat liked to sleep all
+day long. One day, the cat would sleep all day. It felt ashamed.
+The cat woke up and saw a little mouse. The mouse said, "Why are you
+sad, little mouse?" The mouse said, "I am sad because I need to clean."
+```
+
+Shakespeare sample after 14 minutes (prompt `ROMEO:`):
 
 ```
 ROMEO:
