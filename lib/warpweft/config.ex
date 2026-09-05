@@ -39,6 +39,23 @@ defmodule Warpweft.Config do
   @presets %{
     "shakespeare_small" => %{},
 
+    # Shakespeare sized to its own data rather than to a round number.
+    # The corpus is only 1.1 MB, and BPE at vocab 1024 compresses it to
+    # 410K tokens against 3.5M parameters, which memorises. Byte-level
+    # tokenisation (vocab 256 means zero merges) keeps all 1.0M tokens,
+    # and a smaller model brings the ratio to 1.2 tokens per parameter,
+    # the same regime the TinyStories run generalised in.
+    "shakespeare_char" => %{
+      vocab_size: 256,
+      block_size: 256,
+      d_model: 128,
+      n_layer: 4,
+      n_head: 4,
+      dropout: 0.2,
+      total_steps: 4000,
+      eval_every: 200
+    },
+
     # Deliberately identical to shakespeare_small apart from the corpus and
     # the vocabulary it forces, so the two runs isolate the effect of
     # training data volume (410K vs 5.1M tokens) on the generalisation gap.
