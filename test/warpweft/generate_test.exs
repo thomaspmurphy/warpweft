@@ -75,6 +75,37 @@ defmodule Warpweft.GenerateTest do
       end)
     end
 
+    # Temperature was previously untestable-by-accident: the argmax test
+    # pinned top_k to 1 (so temperature could not change the outcome) and
+    # the cached-vs-plain test cancels it on both sides. Deleting the
+    # division entirely left the suite green.
+    test "temperature controls how concentrated the sampling is" do
+      params = params()
+      buffer = Nx.broadcast(Nx.tensor(5, type: :s32), {1, @tiny.block_size})
+      len = Nx.tensor(6, type: :s32)
+
+      draws = fn temperature ->
+        step = Generate.build_step(@tiny, temperature: temperature, top_k: nil)
+
+        Enum.map_reduce(1..150, Nx.Random.key(0), fn _i, key ->
+          {token, key} = step.(params, buffer, len, key)
+          {Nx.to_number(token), key}
+        end)
+        |> elem(0)
+      end
+
+      cold = draws.(0.05)
+      hot = draws.(5.0)
+
+      most_common = cold |> Enum.frequencies() |> Enum.max_by(&elem(&1, 1)) |> elem(1)
+
+      assert most_common > 140,
+             "at temperature 0.05 sampling should collapse onto the argmax, got #{most_common}/150"
+
+      assert length(Enum.uniq(hot)) > 10,
+             "at temperature 5.0 sampling should spread out, got #{length(Enum.uniq(hot))} distinct tokens"
+    end
+
     test "different seeds produce different continuations at high temperature" do
       step = Generate.build_step(@tiny, temperature: 1.5, top_k: nil)
       params = params()
@@ -121,12 +152,26 @@ defmodule Warpweft.GenerateTest do
       cfg: cfg,
       params: params
     } do
-      # Ask for more than fits; with cache: true forced, it must stop cleanly.
-      text =
-        Generate.generate(params, bpe, cfg, "all", max_new_tokens: cfg.block_size * 2, cache: true, seed: 1)
+      # This must genuinely take the cached path, so prompt + n has to fit
+      # in block_size while still running pos up to the limit. An earlier
+      # version asked for block_size * 2 tokens, which made `fits` false
+      # and quietly exercised the recomputing path instead.
+      prompt = "all"
+      prompt_len = length(BPE.encode(bpe, prompt))
+      n = cfg.block_size - prompt_len
 
-      assert is_binary(text)
-      assert String.starts_with?(text, "all")
+      assert Generate.cacheable?(cfg, prompt_len, n), "this test must exercise the cached path"
+
+      text = Generate.generate(params, bpe, cfg, prompt, max_new_tokens: n, cache: true, seed: 1)
+      generated = String.replace_prefix(text, prompt, "")
+
+      # Every requested token is produced, and the run halts at the limit
+      # rather than writing past the end of the cache.
+      assert length(BPE.encode(bpe, generated)) == n
+
+      # And it still matches the recomputing path exactly.
+      plain = Generate.generate(params, bpe, cfg, prompt, max_new_tokens: n, cache: false, seed: 1)
+      assert text == plain
     end
   end
 

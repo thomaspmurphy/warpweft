@@ -151,11 +151,30 @@ defmodule Warpweft.Tokenizer.BPETest do
       assert_matches_spec(String.duplicate("café ", 20_000))
     end
 
-    test "agrees with the spec regex on the real corpus" do
-      path = "data/raw/shakespeare.txt"
+    # Reads a checked-in fixture rather than data/raw/, which is gitignored.
+    # Guarding on File.exists? instead would make this pass on a clean clone
+    # without asserting anything.
+    test "agrees with the spec regex on real prose" do
+      assert_matches_spec(File.read!("test/fixtures/shakespeare_sample.txt"))
+    end
 
-      if File.exists?(path) do
-        assert_matches_spec(File.read!(path))
+    test "agrees with the spec regex on Unicode whitespace" do
+      # `\s` in the spec regex matches Unicode whitespace, not just ASCII,
+      # because Elixir's `u` modifier enables PCRE_UCP. The ASCII fast path
+      # cannot recognise those bytes, so it has to defer to the regex around
+      # them. Getting this wrong split a non-breaking space followed by
+      # an ASCII space into two chunks instead of one.
+      # Written as escapes: these characters are invisible in source.
+      for text <- [
+            "a\u00A0 b",
+            "\u00A0 x",
+            "x\u00A0\ty",
+            "a\u2028 b",
+            "\u3000 z",
+            "word\u00A0\u00A0word",
+            "trailing\u00A0"
+          ] do
+        assert_matches_spec(text)
       end
     end
 
