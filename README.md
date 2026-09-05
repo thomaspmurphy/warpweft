@@ -9,9 +9,17 @@ Nothing is hidden behind a framework's model graph. The parameters are a
 plain nested map, the forward pass is readable top-to-bottom Nx, and the
 training step is four visible lines: forward, gradient, clip, update.
 
-**[docs/FINDINGS.md](docs/FINDINGS.md)** is the implementation log: every
-training run and why we ran it, what the measurements showed, and the
-mistakes worth remembering.
+## Documentation
+
+| Document | What it is |
+| --- | --- |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | What the model is: components, tensor shapes, data flow, and the variant matrix |
+| [docs/CONCEPTS.md](docs/CONCEPTS.md) | What the words mean: a reference for every concept used, grouped by area |
+| [docs/TECHNIQUES.md](docs/TECHNIQUES.md) | How it was built: parsing, array programming, compilation, testing and measurement practices |
+| [docs/FINDINGS.md](docs/FINDINGS.md) | The lab notebook: every training run, what it measured, and the mistakes worth remembering |
+
+Most of the techniques document has nothing to do with machine learning
+and transfers directly to ordinary software.
 
 ## Try it
 
