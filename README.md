@@ -9,14 +9,9 @@ Nothing is hidden behind a framework's model graph. The parameters are a
 plain nested map, the forward pass is readable top-to-bottom Nx, and the
 training step is four visible lines: forward, gradient, clip, update.
 
-Two companion documents:
-
-- **[docs/GUIDE.md](docs/GUIDE.md)** explains the architecture and the
-  techniques conceptually, for readers who want to understand transformers
-  rather than this particular codebase.
-- **[docs/FINDINGS.md](docs/FINDINGS.md)** is the implementation log: every
-  training run and why we ran it, what the measurements showed, and the
-  mistakes worth remembering.
+**[docs/FINDINGS.md](docs/FINDINGS.md)** is the implementation log: every
+training run and why we ran it, what the measurements showed, and the
+mistakes worth remembering.
 
 ## Try it
 

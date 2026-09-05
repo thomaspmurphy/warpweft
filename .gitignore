@@ -27,3 +27,6 @@ warpweft-*.tar
 /data/
 /runs/
 /checkpoints/
+
+# personal teaching material, not part of the repo
+docs/GUIDE.md

@@ -4,8 +4,9 @@ A running record of what we built, every training run and why we ran it,
 what the measurements showed, and the mistakes worth remembering. Written
 for the version of me that comes back to this in six months.
 
-For the conceptual explanation of the architecture itself, see
-[GUIDE.md](GUIDE.md). This document is the lab notebook, not the textbook.
+This document is the lab notebook, not the textbook: it records what we
+did and measured, rather than explaining the architecture from first
+principles.
 
 ---
 
