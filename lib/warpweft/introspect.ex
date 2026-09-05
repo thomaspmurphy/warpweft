@@ -39,6 +39,11 @@ defmodule Warpweft.Introspect do
     bpe = run_dir |> Checkpoint.tokenizer_dir() |> Store.load()
 
     ids = bpe |> BPE.encode(prompt) |> Enum.take(cfg.block_size)
+
+    if ids == [] do
+      raise ArgumentError, "cannot analyse attention for an empty prompt: give some text to attend over"
+    end
+
     tokens = Enum.map(ids, &BPE.decode(bpe, [&1]))
 
     input = Nx.tensor([ids], type: :s32)
@@ -147,7 +152,10 @@ defmodule Warpweft.Introspect do
   Prints a shaded grid for one head. Rows are query positions (the token
   doing the looking), columns are the positions it attends to.
   """
-  def print_heatmap(%{tokens: tokens, weights: weights}, layer, head) do
+  def print_heatmap(%{tokens: tokens, weights: weights, config: cfg}, layer, head) do
+    check_bounds!(layer, cfg.n_layer, "layer")
+    check_bounds!(head, cfg.n_head, "head")
+
     w = weights |> Enum.at(layer) |> then(& &1[[0, head]])
     rows = Nx.to_list(w)
     width = tokens |> Enum.map(&String.length(label(&1))) |> Enum.max()
@@ -160,6 +168,12 @@ defmodule Warpweft.Introspect do
     end
 
     IO.puts("")
+  end
+
+  defp check_bounds!(index, count, name) do
+    unless is_integer(index) and index >= 0 and index < count do
+      raise ArgumentError, "#{name} #{inspect(index)} is out of range: this model has #{count} (0..#{count - 1})"
+    end
   end
 
   defp shade(weight) do

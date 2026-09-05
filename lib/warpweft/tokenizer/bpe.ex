@@ -97,6 +97,17 @@ defmodule Warpweft.Tokenizer.BPE do
   @doc "Total number of tokens (bytes + merges + specials)."
   def vocab_size(%__MODULE__{vocab: vocab}), do: map_size(vocab)
 
+  @end_of_text "<|endoftext|>"
+
+  @doc """
+  The id of the end-of-text token, or `nil` if this tokenizer has none.
+
+  Looked up by name rather than by taking the first special token, because
+  map values come back in term order: with more than one special token,
+  "the first one" is whichever name happens to sort first.
+  """
+  def end_of_text_id(%__MODULE__{special_tokens: specials}), do: Map.get(specials, @end_of_text)
+
   @doc """
   Encodes `text` into a list of token ids.
 
@@ -237,10 +248,19 @@ defmodule Warpweft.Tokenizer.BPE do
 
   # A chunk can only span a position when both sides share a character
   # class, or when a single literal space is glued to the run after it.
-  # So the first whitespace byte that follows a non-whitespace byte is
-  # always a boundary no chunk can straddle.
+  # So a whitespace byte following a non-whitespace byte is a boundary no
+  # chunk can straddle.
+  #
+  # Both sides must be ASCII to know that. `\s` in the spec regex matches
+  # *Unicode* whitespace (Elixir's `u` modifier enables PCRE_UCP), so a
+  # byte >= 128 might be whitespace we cannot recognise here, and a `\s+`
+  # chunk could then straddle the split. Requiring the preceding byte to
+  # be ASCII and non-whitespace rules that out.
   defp safe_split(bin, from, size) when from < size do
-    if ws?(:binary.at(bin, from)) and not ws?(:binary.at(bin, from - 1)) do
+    here = :binary.at(bin, from)
+    prev = :binary.at(bin, from - 1)
+
+    if ws?(here) and prev < 128 and not ws?(prev) do
       from
     else
       safe_split(bin, from + 1, size)
@@ -313,7 +333,9 @@ defmodule Warpweft.Tokenizer.BPE do
 
   defp run_end(_bin, i, _cls, _size), do: i
 
-  # PCRE's \s without PCRE_UCP is ASCII whitespace only.
+  # ASCII whitespace. The spec regex's `\s` is wider than this (it matches
+  # Unicode whitespace too), which is why every caller here also requires
+  # the byte to be ASCII before trusting the answer.
   defp ws?(c), do: c in [0x20, 0x09, 0x0A, 0x0B, 0x0C, 0x0D]
 
   defp class(c) when c in ?a..?z or c in ?A..?Z, do: :letter

@@ -49,8 +49,11 @@ defmodule Warpweft.Generate do
     seed = Keyword.get(opts, :seed, 1337)
     stop_at_eot = Keyword.get(opts, :stop_at_eot, true)
 
+    validate_positive!(:max_new_tokens, max_new_tokens)
+    validate_temperature!(Keyword.get(opts, :temperature, 0.8))
+
     prompt_ids = BPE.encode(bpe, prompt)
-    eot = if stop_at_eot, do: bpe.special_tokens |> Map.values() |> List.first()
+    eot = if stop_at_eot, do: BPE.end_of_text_id(bpe)
 
     fits = length(prompt_ids) + max_new_tokens <= cfg.block_size
     use_cache = Keyword.get(opts, :cache, true) and fits
@@ -68,6 +71,23 @@ defmodule Warpweft.Generate do
 
   @doc "Whether a prompt of `prompt_len` plus `n` new tokens can use the cache."
   def cacheable?(%Config{} = cfg, prompt_len, n), do: prompt_len + n <= cfg.block_size
+
+  defp validate_positive!(name, value) do
+    unless is_integer(value) and value > 0 do
+      raise ArgumentError, "#{name} must be a positive integer, got #{inspect(value)}"
+    end
+  end
+
+  # Temperature divides the logits, so zero yields infinities and then NaN
+  # once Gumbel noise is added, and argmax returns an arbitrary token. Ask
+  # for greedy decoding with `top_k: 1` instead.
+  defp validate_temperature!(t) do
+    unless is_number(t) and t > 0 do
+      raise ArgumentError,
+            "temperature must be greater than 0, got #{inspect(t)}. " <>
+              "For greedy decoding use top_k: 1 (or a small temperature such as 0.01)."
+    end
+  end
 
   @doc """
   Builds the jitted `(params, buffer, len, key) -> {token, key}` step.
@@ -156,7 +176,7 @@ defmodule Warpweft.Generate do
       pending: ""
     }
 
-    Enum.reduce_while(1..max_new_tokens, state, fn _i, state ->
+    Enum.reduce_while(1..max_new_tokens//1, state, fn _i, state ->
       {token_t, key} = sample.(state.logits, state.key, temperature)
       token = Nx.to_number(token_t)
       state = %{state | key: key, out: [token | state.out], pending: emit.(state.pending, token)}
@@ -272,7 +292,7 @@ defmodule Warpweft.Generate do
 
     state = %{buffer: buffer, len: max(len, 1), key: Nx.Random.key(seed), out: [], pending: ""}
 
-    Enum.reduce_while(1..max_new_tokens, state, fn _i, state ->
+    Enum.reduce_while(1..max_new_tokens//1, state, fn _i, state ->
       {token_t, key} = step.(params, state.buffer, Nx.tensor(state.len, type: :s32), state.key)
       token = Nx.to_number(token_t)
       token_2d = Nx.reshape(token_t, {1, 1})

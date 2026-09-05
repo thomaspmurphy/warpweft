@@ -22,7 +22,8 @@ IO.puts("generating #{n} tokens per method\n")
 
 # --- 1. KV cache ------------------------------------------------------------
 
-{decode, sample} = Warpweft.Generate.build_cached_fns(cfg, temperature: 0.8, top_k: 50)
+{decode, sample} = Warpweft.Generate.build_cached_fns(cfg, top_k: 50)
+temperature = Nx.tensor(0.8, type: :f32)
 cache0 = Warpweft.Model.Decode.init_cache(cfg)
 tok0 = Nx.tensor([[0]], type: :s32)
 
@@ -32,7 +33,7 @@ tok0 = Nx.tensor([[0]], type: :s32)
   :timer.tc(fn ->
     Enum.reduce(0..(n - 1), {cache0, Nx.Random.key(1), tok0}, fn pos, {cache, key, token} ->
       {logits, cache} = decode.(params, token, cache, Nx.tensor(pos, type: :s32))
-      {next, key} = sample.(logits, key)
+      {next, key} = sample.(logits, key, temperature)
       {cache, key, Nx.reshape(next, {1, 1}) |> Nx.as_type(:s32)}
     end)
   end)

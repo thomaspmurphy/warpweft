@@ -34,7 +34,7 @@ defmodule Mix.Tasks.Wf.Repl do
 
     Mix.Task.run("app.start")
 
-    run_dir = Keyword.get_lazy(opts, :run, &latest_run!/0)
+    run_dir = Warpweft.Runs.resolve!(opts[:run])
 
     IO.puts("loading #{run_dir} ...")
     {params, cfg} = Checkpoint.load_run(run_dir)
@@ -86,6 +86,8 @@ defmodule Mix.Tasks.Wf.Repl do
 
     IO.write("\n" <> prompt)
 
+    {:ok, counter} = Agent.start_link(fn -> 0 end)
+
     {us, _} =
       :timer.tc(fn ->
         Generate.generate(state.params, state.bpe, state.cfg, prompt,
@@ -93,11 +95,20 @@ defmodule Mix.Tasks.Wf.Repl do
           temperature: s.temperature,
           top_k: if(s.top_k == 0, do: nil, else: s.top_k),
           seed: seed,
-          on_token: &IO.write/1
+          on_token: fn chunk ->
+            Agent.update(counter, &(&1 + 1))
+            IO.write(chunk)
+          end
         )
       end)
 
-    IO.puts("\n\n[#{s.n} tokens, #{Float.round(us / 1000, 0)} ms, seed #{seed}]")
+    # Report what was actually produced: generation stops early at the
+    # end-of-text token or the context limit.
+    emitted = Agent.get(counter, & &1)
+    Agent.stop(counter)
+    note = if emitted < s.n, do: " of #{s.n} requested", else: ""
+
+    IO.puts("\n\n[#{emitted} tokens#{note}, #{Float.round(us / 1000, 0)} ms, seed #{seed}]")
     state
   end
 
@@ -165,10 +176,4 @@ defmodule Mix.Tasks.Wf.Repl do
     end
   end
 
-  defp latest_run! do
-    case "runs" |> File.ls!() |> Enum.sort(:desc) |> List.first() do
-      nil -> raise "no runs found; train one first with: mix wf.train"
-      dir -> Path.join("runs", dir)
-    end
-  end
 end

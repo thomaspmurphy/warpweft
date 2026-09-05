@@ -22,7 +22,7 @@ defmodule Mix.Tasks.Wf.Generate do
 
     Mix.Task.run("app.start")
 
-    run_dir = Keyword.get_lazy(opts, :run, &latest_run!/0)
+    run_dir = Warpweft.Runs.resolve!(opts[:run])
 
     gen_opts =
       [max_new_tokens: opts[:n], temperature: opts[:temp], seed: opts[:seed]]
@@ -43,10 +43,4 @@ defmodule Mix.Tasks.Wf.Generate do
     IO.puts("\n--- #{run_dir}, #{Float.round(us / 1_000_000, 1)}s (incl. compilation)")
   end
 
-  defp latest_run! do
-    case "runs" |> File.ls() |> then(fn {:ok, l} -> Enum.sort(l, :desc) end) |> List.first() do
-      nil -> raise "no runs found; train first with: mix wf.train"
-      dir -> Path.join("runs", dir)
-    end
-  end
 end

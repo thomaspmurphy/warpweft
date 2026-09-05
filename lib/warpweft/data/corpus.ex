@@ -37,7 +37,17 @@ defmodule Warpweft.Data.Corpus do
     else
       File.mkdir_p!(@raw_dir)
       IO.puts("#{name}: downloading #{spec.url}")
-      %{status: 200, body: body} = Req.get!(spec.url, receive_timeout: 300_000, decode_body: false)
+      body =
+        case Req.get(spec.url, receive_timeout: 300_000, decode_body: false) do
+          {:ok, %{status: 200, body: body}} ->
+            body
+
+          {:ok, %{status: status}} ->
+            raise "downloading #{name} failed: HTTP #{status} from #{spec.url}"
+
+          {:error, reason} ->
+            raise "downloading #{name} failed: #{Exception.message(reason)} (#{spec.url})"
+        end
 
       if byte_size(body) < spec.min_bytes do
         raise "download for #{name} too small: #{byte_size(body)} bytes (expected >= #{spec.min_bytes})"

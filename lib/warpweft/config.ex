@@ -62,6 +62,20 @@ defmodule Warpweft.Config do
 
   @atom_fields [:pos, :norm, :mlp]
 
+  @allowed_variants %{
+    pos: ["rope", "learned"],
+    norm: ["rms_norm", "layer_norm"],
+    mlp: ["swiglu", "gelu"]
+  }
+
+  @doc """
+  Struct fields whose values are atoms and so need converting back from
+  strings on load. Asserted against the struct in the test suite, because
+  adding an atom-valued field and forgetting it here would make `load/1`
+  silently return a string that only explodes later inside the model.
+  """
+  def atom_fields, do: @atom_fields
+
   def presets, do: Map.keys(@presets)
 
   def preset(name) do
@@ -76,6 +90,43 @@ defmodule Warpweft.Config do
     div(d, h)
   end
 
+  @doc """
+  Checks a config is self-consistent, raising with a specific message.
+
+  Called from `Warpweft.Model.init/2` so problems surface immediately
+  rather than as a reshape error inside attention, or (worse) silently:
+  RoPE splits each head in half, so an odd `head_dim` would quietly drop a
+  channel from every query and key.
+  """
+  def validate!(%__MODULE__{} = cfg) do
+    positive = [
+      vocab_size: cfg.vocab_size,
+      block_size: cfg.block_size,
+      n_layer: cfg.n_layer,
+      n_head: cfg.n_head,
+      d_model: cfg.d_model
+    ]
+
+    for {name, value} <- positive, not (is_integer(value) and value > 0) do
+      raise ArgumentError, "#{name} must be a positive integer, got #{inspect(value)}"
+    end
+
+    head_dim = head_dim(cfg)
+
+    if cfg.pos == :rope and rem(head_dim, 2) != 0 do
+      raise ArgumentError,
+            "RoPE needs an even head_dim, got #{head_dim} " <>
+              "(d_model #{cfg.d_model} / n_head #{cfg.n_head}). " <>
+              "Adjust d_model or n_head, or use pos: :learned."
+    end
+
+    unless cfg.dropout >= 0.0 and cfg.dropout < 1.0 do
+      raise ArgumentError, "dropout must be in [0.0, 1.0), got #{inspect(cfg.dropout)}"
+    end
+
+    cfg
+  end
+
   @doc "SwiGLU hidden size: ~8/3 * d_model rounded up to a multiple of 32."
   def swiglu_hidden(%__MODULE__{d_model: d}), do: ceil(d * 8 / 3 / 32) * 32
 
@@ -85,17 +136,49 @@ defmodule Warpweft.Config do
   end
 
   def load(dir) do
+    path = Path.join(dir, "config.json")
+    known = __MODULE__ |> struct() |> Map.from_struct() |> Map.keys() |> MapSet.new()
+
     fields =
-      dir
-      |> Path.join("config.json")
+      path
       |> File.read!()
       |> JSON.decode!()
-      |> Map.new(fn {k, v} ->
-        k = String.to_existing_atom(k)
-        v = if k in @atom_fields, do: String.to_existing_atom(v), else: v
-        {k, v}
-      end)
+      |> Map.new(fn {k, v} -> {parse_key!(k, known, path), v} end)
+      |> Map.new(fn {k, v} -> {k, parse_value!(k, v, path)} end)
 
     struct!(__MODULE__, fields)
   end
+
+  defp parse_key!(key, known, path) do
+    atom = String.to_existing_atom(key)
+    if MapSet.member?(known, atom), do: atom, else: unknown!(key, known, path)
+  rescue
+    ArgumentError -> unknown!(key, known, path)
+  end
+
+  defp unknown!(key, known, path) do
+    raise ArgumentError,
+          "#{path} has unknown field #{inspect(key)}. " <>
+            "Known fields: #{known |> Enum.sort() |> Enum.join(", ")}."
+  end
+
+  # Variant fields are stored as strings in JSON and must come back as the
+  # atoms the model dispatches on, so an unrecognised value has to fail
+  # here rather than reach the forward pass as a string.
+  defp parse_value!(key, value, path) when is_binary(value) do
+    if key in @atom_fields do
+      allowed = @allowed_variants[key]
+
+      if value in allowed do
+        String.to_existing_atom(value)
+      else
+        raise ArgumentError,
+              "#{path} has #{key}: #{inspect(value)}, expected one of #{Enum.join(allowed, ", ")}."
+      end
+    else
+      value
+    end
+  end
+
+  defp parse_value!(_key, value, _path), do: value
 end

@@ -26,9 +26,8 @@ defmodule Warpweft.Data.Dataset do
   def pretokenize(bpe, text, corpus_name) do
     ids = BPE.encode(bpe, text)
     n = length(ids)
-    eot = bpe.special_tokens |> Map.values() |> List.first()
 
-    {train_ids, val_ids} = split(ids, n, eot)
+    {train_ids, val_ids} = split(ids, n, BPE.end_of_text_id(bpe))
 
     prefix = prefix(corpus_name, BPE.vocab_size(bpe))
     File.mkdir_p!(@tokenized_dir)
@@ -49,8 +48,37 @@ defmodule Warpweft.Data.Dataset do
   @doc "Loads `{train, val, meta}` where train/val are 1-D s32 tensors."
   def load(corpus_name, vocab_size) do
     prefix = prefix(corpus_name, vocab_size)
-    meta = (prefix <> ".meta.json") |> File.read!() |> JSON.decode!()
+    meta_path = prefix <> ".meta.json"
+
+    unless File.exists?(meta_path) do
+      raise ArgumentError, """
+      No tokenized data for corpus #{inspect(corpus_name)} at vocab size #{vocab_size}.
+      Expected #{meta_path}.
+
+      Prepare it with:
+          mix wf.data --corpus #{corpus_name}
+          mix wf.tokenizer.train --corpus #{corpus_name} --vocab #{vocab_size}
+      #{available_hint(corpus_name)}\
+      """
+    end
+
+    meta = meta_path |> File.read!() |> JSON.decode!()
     {load_bin(prefix <> ".train.bin"), load_bin(prefix <> ".val.bin"), meta}
+  end
+
+  defp available_hint(corpus_name) do
+    case Path.wildcard(Path.join(@tokenized_dir, "#{corpus_name}-*.meta.json")) do
+      [] ->
+        ""
+
+      paths ->
+        sizes =
+          paths
+          |> Enum.map(&(&1 |> Path.basename(".meta.json") |> String.split("-") |> List.last()))
+          |> Enum.join(", ")
+
+        "\nAlready tokenized at vocab size(s): #{sizes}."
+    end
   end
 
   defp load_bin(path) do
@@ -62,18 +90,23 @@ defmodule Warpweft.Data.Dataset do
 
   # Document-boundary split: cut at the last end-of-text token before the
   # 90% mark so no document straddles the train/val boundary.
+  #
+  # Falls back to cutting at the target when the nearest boundary is far
+  # from it. Without that floor, a corpus whose only end-of-text token sits
+  # near the start would silently yield a split like 1% train / 99% val.
   defp split(ids, n, eot) when is_integer(eot) do
     target = round(n * (1.0 - @val_fraction))
+    floor = round(target * 0.9)
 
     cut =
       ids
       |> Enum.with_index()
-      |> Enum.reduce(target, fn
+      |> Enum.reduce(0, fn
         {^eot, i}, _acc when i <= target -> i + 1
         _, acc -> acc
       end)
 
-    Enum.split(ids, cut)
+    Enum.split(ids, if(cut >= floor, do: cut, else: target))
   end
 
   defp split(ids, n, nil) do

@@ -30,6 +30,7 @@ defmodule Warpweft.Model do
   # -- init ---------------------------------------------------------------------
 
   def init(%Config{} = cfg, key) do
+    Config.validate!(cfg)
     d = cfg.d_model
     resid_std = @init_std / :math.sqrt(2 * cfg.n_layer)
 

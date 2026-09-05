@@ -41,7 +41,20 @@ defmodule Mix.Tasks.Wf.Tokenizer.Train do
     {us, bpe} = :timer.tc(fn -> BPE.train(train_text, vocab, special_tokens: specials, log_every: 100) end)
     IO.puts("trained #{length(bpe.merges)} merges in #{Float.round(us / 1_000_000, 1)}s")
 
-    dir = Path.join("data/tokenizers", "#{corpus}-#{vocab}")
+    # Name everything after the vocabulary actually achieved, not the one
+    # requested. BPE stops merging early when the corpus runs out of pairs,
+    # and `Warpweft.Train` looks both the tokenizer and the tokenized data
+    # up by the model's vocab_size, so the two must agree.
+    achieved = BPE.vocab_size(bpe)
+
+    if achieved < vocab do
+      IO.puts(
+        "note: corpus exhausted its pairs at #{achieved} tokens, short of the #{vocab} requested. " <>
+          "Train with --vocab #{achieved} (or a larger corpus)."
+      )
+    end
+
+    dir = Path.join("data/tokenizers", "#{corpus}-#{achieved}")
     Store.save(bpe, dir)
     IO.puts("saved tokenizer to #{dir}")
 

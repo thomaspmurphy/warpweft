@@ -5,19 +5,29 @@ defmodule Warpweft.Checkpoint do
       runs/<name>/
         config.json      # full Warpweft.Config
         tokenizer.txt    # path to the tokenizer dir used
-        latest.ckpt      # params + optimizer state + step (for resume)
-        best.ckpt        # params only, at the best validation loss
+        latest.ckpt      # params + optimiser state + step (for resume)
+        best.ckpt        # params and the validation loss they scored,
+                         # at the best evaluation so far (no optimiser state)
   """
 
   alias Warpweft.Config
 
   def create_run_dir(%Config{} = config, tokenizer_dir) do
     stamp = Calendar.strftime(DateTime.utc_now(), "%Y%m%d-%H%M%S")
-    dir = Path.join("runs", stamp)
+    dir = unique_dir(Path.join("runs", stamp), 0)
     File.mkdir_p!(dir)
     Config.save(config, dir)
     File.write!(Path.join(dir, "tokenizer.txt"), tokenizer_dir)
     dir
+  end
+
+  # The stamp has one-second resolution, so a sweep launching several short
+  # runs can collide. Suffix rather than overwrite an existing run.
+  defp unique_dir(base, 0), do: if(File.exists?(base), do: unique_dir(base, 2), else: base)
+
+  defp unique_dir(base, n) do
+    candidate = "#{base}-#{n}"
+    if File.exists?(candidate), do: unique_dir(base, n + 1), else: candidate
   end
 
   def tokenizer_dir(run_dir), do: run_dir |> Path.join("tokenizer.txt") |> File.read!() |> String.trim()
@@ -40,6 +50,27 @@ defmodule Warpweft.Checkpoint do
 
   def load(path) do
     path |> File.read!() |> Nx.deserialize()
+  end
+
+  @doc """
+  The validation loss recorded in `best.ckpt`, or `:infinity` if there is
+  no best checkpoint yet.
+
+  Resuming must read this back: starting from `:infinity` would make the
+  first evaluation after a resume always look like an improvement and
+  overwrite a genuinely better checkpoint.
+  """
+  def best_val_loss(run_dir) do
+    path = Path.join(run_dir, "best.ckpt")
+
+    if File.exists?(path) do
+      case load(path) do
+        %{"val_loss" => loss} -> Nx.to_number(loss)
+        _ -> :infinity
+      end
+    else
+      :infinity
+    end
   end
 
   @doc "Loads the best (fallback: latest) params from a run dir, plus its config."

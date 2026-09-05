@@ -16,7 +16,21 @@ defmodule Warpweft.Data.Batches do
   def sample(data, key, batch, block) do
     n = Nx.size(data)
 
-    {offsets, key} = Nx.Random.randint(key, 0, n - block - 1, shape: {batch}, type: :s32)
+    # Each window needs block + 1 tokens, so the last valid offset is
+    # n - block - 1. `randint` excludes its upper bound, hence n - block.
+    #
+    # This is checked rather than clamped because `Nx.take` silently
+    # clamps out-of-range gather indices: a corpus shorter than the window
+    # would train on windows whose tails are one repeated token, with no
+    # error anywhere.
+    if n < block + 2 do
+      raise ArgumentError,
+            "corpus of #{n} tokens is too short for block_size #{block}; " <>
+              "need at least #{block + 2}. Use a longer corpus or a smaller " <>
+              "block_size (note the validation split is only ~10% of the corpus)."
+    end
+
+    {offsets, key} = Nx.Random.randint(key, 0, n - block, shape: {batch}, type: :s32)
 
     idx =
       offsets

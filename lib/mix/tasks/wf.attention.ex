@@ -26,7 +26,7 @@ defmodule Mix.Tasks.Wf.Attention do
 
     Mix.Task.run("app.start")
 
-    run_dir = Keyword.get_lazy(opts, :run, &latest_run!/0)
+    run_dir = Warpweft.Runs.resolve!(opts[:run])
     prompt = Keyword.get(opts, :prompt, "First Citizen:\nBefore we")
 
     result = Introspect.analyze(run_dir, prompt)
@@ -39,8 +39,8 @@ defmodule Mix.Tasks.Wf.Attention do
 
     IO.puts("tokens: #{inspect(result.tokens)}")
 
-    layers = if opts[:layer], do: [opts[:layer]], else: 0..(cfg.n_layer - 1) |> Enum.to_list()
-    heads = if opts[:head], do: [opts[:head]], else: 0..(cfg.n_head - 1) |> Enum.to_list()
+    layers = selection!(opts[:layer], cfg.n_layer, "layer")
+    heads = selection!(opts[:head], cfg.n_head, "head")
     selected = for l <- layers, h <- heads, do: {l, h}
 
     result
@@ -56,10 +56,11 @@ defmodule Mix.Tasks.Wf.Attention do
     :ok
   end
 
-  defp latest_run! do
-    case "runs" |> File.ls!() |> Enum.sort(:desc) |> List.first() do
-      nil -> raise "no runs found; train first with: mix wf.train"
-      dir -> Path.join("runs", dir)
-    end
+  defp selection!(nil, count, _name), do: Enum.to_list(0..(count - 1))
+
+  defp selection!(index, count, _name) when index >= 0 and index < count, do: [index]
+
+  defp selection!(index, count, name) do
+    Mix.raise("--#{name} #{index} is out of range: this model has #{count} (0..#{count - 1})")
   end
 end

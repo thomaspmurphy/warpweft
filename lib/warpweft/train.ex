@@ -96,7 +96,9 @@ defmodule Warpweft.Train do
     initial = %{
       params: params,
       opt_state: opt_state,
-      best_val: :infinity,
+      # Read back rather than reset, so resuming cannot overwrite a better
+      # best.ckpt with the first evaluation after the restart.
+      best_val: Checkpoint.best_val_loss(run_dir),
       window_start: System.monotonic_time(:millisecond),
       window_steps: 0
     }
@@ -162,6 +164,10 @@ defmodule Warpweft.Train do
 
   @doc "Mean inference-mode loss over `eval_batches` random validation batches."
   def evaluate(eval_step, params, val_data, %Config{} = cfg) do
+    if cfg.eval_batches < 1 do
+      raise ArgumentError, "eval_batches must be at least 1, got #{cfg.eval_batches}"
+    end
+
     Batches.stream(val_data, cfg.seed + 7919, cfg.batch_size, cfg.block_size)
     |> Stream.take(cfg.eval_batches)
     |> Enum.map(fn {x, y, _key} -> eval_step.(params, x, y) end)
