@@ -30,6 +30,11 @@ defmodule Warpweft.Tokenizer.BPE do
   @doc """
   Trains a tokenizer on `text` up to `vocab_size` total tokens.
 
+  `vocab_size` is an upper bound, not a guarantee: merging stops early if
+  the corpus runs out of adjacent pairs, which happens with small or very
+  repetitive text. Always size a model from `vocab_size/1` on the trained
+  tokenizer rather than from the number you asked for.
+
   Options:
     * `:special_tokens` - strings assigned dedicated ids after the merges
       (e.g. `["<|endoftext|>"]`). They are split out before byte encoding
@@ -131,7 +136,21 @@ defmodule Warpweft.Tokenizer.BPE do
 
   @doc "Decodes a list of token ids back into a binary."
   def decode(%__MODULE__{vocab: vocab}, ids) do
-    ids |> Enum.map(&Map.fetch!(vocab, &1)) |> IO.iodata_to_binary()
+    ids
+    |> Enum.map(fn id ->
+      case vocab do
+        %{^id => bytes} ->
+          bytes
+
+        _ ->
+          raise ArgumentError,
+                "token id #{id} is outside this tokenizer's vocabulary of #{map_size(vocab)}. " <>
+                  "A model configured with a larger vocab_size than its tokenizer will emit " <>
+                  "ids like this one; note that BPE.train/3 treats vocab_size as an upper " <>
+                  "bound and stops early when the corpus runs out of pairs to merge."
+      end
+    end)
+    |> IO.iodata_to_binary()
   end
 
   # -- chunking ----------------------------------------------------------------

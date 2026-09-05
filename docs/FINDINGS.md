@@ -420,6 +420,25 @@ Things that cost real debugging time.
   seconds; eyeballing would not have.
 - **EXLA logs `Falling back to 1 / sqrt(x) for f32`** on CPU. Cosmetic,
   emitted by `Nx.rsqrt`.
+- **Streaming byte-level tokens needs a UTF-8 hold-back buffer.** A token
+  can end mid-codepoint, so writing each token's bytes straight to the
+  terminal prints mojibake. Incomplete trailing bytes must be held until
+  the next token completes them. Separately, bytes that can *never* form a
+  character need substituting with U+FFFD rather than passing through —
+  otherwise the stream can emit invalid UTF-8, which a test caught
+  immediately with a randomly initialized model.
+- **The BPE base alphabet is all 256 bytes regardless of corpus.** So
+  every tokenizer's vocabulary contains raw high bytes, and a randomly
+  initialized model emits malformed UTF-8 constantly. This defeated an
+  attempt to test stream reassembly on an "ASCII-only" corpus — there is
+  no such thing here. The working approach was a differential test that
+  mirrors the substitution policy.
+- **`BPE.train/3`'s `vocab_size` is an upper bound, not a guarantee.**
+  Merging halts early when the corpus runs out of adjacent pairs, which
+  happens easily on small or repetitive text. Configuring a model with the
+  number you *asked for* rather than `BPE.vocab_size/1` on the result
+  produces token ids the tokenizer cannot decode. `decode/2` now raises
+  with an explanation instead of a bare `map_get` error.
 - **`Nx.Defn.jit` over a closure capturing the config works well.** The
   config is read at trace time, so each variant combination compiles to
   its own specialized program with no runtime branching. This is what

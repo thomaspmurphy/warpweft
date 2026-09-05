@@ -54,12 +54,13 @@ defmodule Warpweft.Generate do
 
     fits = length(prompt_ids) + max_new_tokens <= cfg.block_size
     use_cache = Keyword.get(opts, :cache, true) and fits
+    opts = Keyword.put(opts, :tokenizer, bpe)
 
     new_ids =
       if use_cache do
         cached_loop(params, prompt_ids, cfg, max_new_tokens, seed, eot, opts)
       else
-        sample_loop(build_step(cfg, opts), params, prompt_ids, cfg, max_new_tokens, seed, eot)
+        sample_loop(build_step(cfg, opts), params, prompt_ids, cfg, max_new_tokens, seed, eot, opts)
       end
 
     prompt <> BPE.decode(bpe, new_ids)
@@ -114,15 +115,16 @@ defmodule Warpweft.Generate do
   cached path produce byte-identical output to the recomputing path.
   """
   def build_cached_fns(%Config{} = cfg, opts \\ []) do
-    temperature = Keyword.get(opts, :temperature, 0.8)
     top_k = Keyword.get(opts, :top_k, 50)
 
     decode = Nx.Defn.jit(fn params, token, cache, pos -> Decode.step(params, token, cache, pos, cfg) end)
 
+    # Temperature is a runtime argument so it can be changed without
+    # recompiling; top-k cannot be, since `Nx.top_k` needs `k` to shape
+    # its output at trace time.
     sample =
-      Nx.Defn.jit(fn logits, key ->
-        {token, key} = sample_token(Nx.divide(logits, temperature), key, top_k)
-        {token, key}
+      Nx.Defn.jit(fn logits, key, temperature ->
+        sample_token(Nx.divide(logits, temperature), key, top_k)
       end)
 
     {decode, sample}
@@ -130,6 +132,8 @@ defmodule Warpweft.Generate do
 
   defp cached_loop(params, prompt_ids, cfg, max_new_tokens, seed, eot, opts) do
     {decode, sample} = build_cached_fns(cfg, opts)
+    temperature = Nx.tensor(Keyword.get(opts, :temperature, 0.8), type: :f32)
+    emit = emitter(opts)
 
     prompt_ids = Enum.take(prompt_ids, -cfg.block_size)
     prompt_ids = if prompt_ids == [], do: [0], else: prompt_ids
@@ -148,13 +152,14 @@ defmodule Warpweft.Generate do
       cache: cache,
       key: Nx.Random.key(seed),
       pos: length(prompt_ids),
-      out: []
+      out: [],
+      pending: ""
     }
 
     Enum.reduce_while(1..max_new_tokens, state, fn _i, state ->
-      {token_t, key} = sample.(state.logits, state.key)
+      {token_t, key} = sample.(state.logits, state.key, temperature)
       token = Nx.to_number(token_t)
-      state = %{state | key: key, out: [token | state.out]}
+      state = %{state | key: key, out: [token | state.out], pending: emit.(state.pending, token)}
 
       cond do
         token == eot ->
@@ -175,7 +180,65 @@ defmodule Warpweft.Generate do
           {:cont, %{state | logits: logits, cache: cache, pos: state.pos + 1}}
       end
     end)
-    |> then(fn state -> Enum.reverse(state.out) end)
+    |> then(fn state ->
+      emit.(state.pending, :flush)
+      Enum.reverse(state.out)
+    end)
+  end
+
+  # Builds a per-token emitter for the `:on_token` callback.
+  #
+  # Tokens are byte-level, so a single token can end mid-codepoint: an
+  # accented letter or an emoji spans several tokens' worth of bytes.
+  # Writing each token's bytes out as they arrive would therefore print
+  # mojibake. Trailing bytes that could still be completed are held back
+  # until the next token supplies the rest.
+  #
+  # The callback is guaranteed to receive valid UTF-8. Bytes that can
+  # never form a character (which a well-trained model does not produce,
+  # but a random one does) are replaced with U+FFFD rather than passed
+  # through, so a terminal can render the stream safely.
+  #
+  # Returns a function taking the pending bytes and either a token id or
+  # `:flush`, and returning the new pending bytes.
+  defp emitter(opts) do
+    case Keyword.get(opts, :on_token) do
+      nil ->
+        fn pending, _ -> pending end
+
+      fun ->
+        bpe = Keyword.fetch!(opts, :tokenizer)
+
+        fn
+          pending, :flush ->
+            # Anything still pending is a truncated character.
+            if pending != "", do: fun.("�")
+            ""
+
+          pending, token ->
+            {ready, keep} = split_complete_utf8(pending <> BPE.decode(bpe, [token]))
+            if ready != "", do: fun.(ready)
+            keep
+        end
+    end
+  end
+
+  # Splits into {emittable valid UTF-8, bytes that may yet be completed}.
+  defp split_complete_utf8(bytes) do
+    case :unicode.characters_to_binary(bytes) do
+      valid when is_binary(valid) ->
+        {bytes, ""}
+
+      # Truncated: the tail could still become a character.
+      {:incomplete, valid, rest} ->
+        {valid, rest}
+
+      # Malformed: this byte can never start or continue a character, so
+      # substitute and carry on rather than stalling the stream forever.
+      {:error, valid, <<_bad, rest::binary>>} ->
+        {more, keep} = split_complete_utf8(rest)
+        {valid <> "�" <> more, keep}
+    end
   end
 
   # Temperature-scaled top-k Gumbel-max sampling over {1, vocab} logits.
@@ -198,15 +261,16 @@ defmodule Warpweft.Generate do
     {masked |> Nx.add(gumbel) |> Nx.argmax(axis: -1) |> Nx.reshape({}), key}
   end
 
-  defp sample_loop(step, params, prompt_ids, cfg, max_new_tokens, seed, eot) do
+  defp sample_loop(step, params, prompt_ids, cfg, max_new_tokens, seed, eot, opts) do
     block = cfg.block_size
+    emit = emitter(opts)
 
     # Keep at most the last block tokens of the prompt; left-align in the buffer.
     context = Enum.take(prompt_ids, -block)
     len = length(context)
     buffer = Nx.tensor([context ++ List.duplicate(0, block - len)], type: :s32)
 
-    state = %{buffer: buffer, len: max(len, 1), key: Nx.Random.key(seed), out: []}
+    state = %{buffer: buffer, len: max(len, 1), key: Nx.Random.key(seed), out: [], pending: ""}
 
     Enum.reduce_while(1..max_new_tokens, state, fn _i, state ->
       {token_t, key} = step.(params, state.buffer, Nx.tensor(state.len, type: :s32), state.key)
@@ -223,10 +287,13 @@ defmodule Warpweft.Generate do
           %{state | buffer: Nx.concatenate([kept, token_2d], axis: 1)}
         end
 
-      state = %{state | key: key, out: [token | state.out]}
+      state = %{state | key: key, out: [token | state.out], pending: emit.(state.pending, token)}
 
       if token == eot, do: {:halt, state}, else: {:cont, state}
     end)
-    |> then(fn state -> Enum.reverse(state.out) end)
+    |> then(fn state ->
+      emit.(state.pending, :flush)
+      Enum.reverse(state.out)
+    end)
   end
 end

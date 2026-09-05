@@ -13,6 +13,37 @@ training step is four visible lines: forward, gradient, clip, update.
 training run and why we ran it, what the measurements showed, and the
 mistakes worth remembering.
 
+## Try it
+
+If a model has already been trained into `runs/`, this is the whole thing:
+
+```sh
+mix wf.repl
+```
+
+It loads the newest run, warms up the compiled sampler, and gives you a
+prompt. Type anything and the continuation streams back token by token:
+
+```
+warpweft> Once upon a time
+
+Once upon a time, there was a little girl named Amy. Amy loved to play
+with her toys and share them with her friends. One day, Amy found a
+small toy box in her room. The toy was a magic wand. It could talk!
+
+[120 tokens, 96 ms, seed 952621]
+```
+
+Commands inside the prompt: `/temp 1.2`, `/n 200`, `/top-k 0`,
+`/seed 42`, `/settings`, `/help`, `/quit`. Temperature is a runtime
+argument, so changing it costs nothing; changing `top-k` recompiles.
+
+One-shot, without the REPL:
+
+```sh
+mix wf.generate --prompt "Once upon a time" -n 200
+```
+
 ## Quick start
 
 ```sh
@@ -52,7 +83,8 @@ mix wf.train --preset tinystories_base    # 12.2M params, ~8h on CPU
 | RoPE           | `lib/warpweft/model/rope.ex`       | rotary positions, half-split style                                            |
 | Training       | `lib/warpweft/train.ex`            | hand-rolled loop: `value_and_grad` -> clip -> AdamW, one jitted step          |
 | LR schedule    | `lib/warpweft/schedule.ex`         | linear warmup + cosine decay                                                  |
-| Generation     | `lib/warpweft/generate.ex`         | KV-cache decoding, Gumbel-max + top-k, compile-once fixed-shape fallback      |
+| Generation     | `lib/warpweft/generate.ex`         | KV-cache decoding, Gumbel-max + top-k, UTF-8-safe token streaming             |
+| REPL           | `lib/mix/tasks/wf.repl.ex`         | interactive prompt, model loaded and compiled once                            |
 | KV cache       | `lib/warpweft/model/decode.ex`     | single-position forward pass; O(context) per token instead of O(context²)     |
 | Introspection  | `lib/warpweft/introspect.ex`       | per-head attention statistics and terminal heatmaps                           |
 | Checkpoints    | `lib/warpweft/checkpoint.ex`       | self-contained `runs/<timestamp>/` dirs, resume with `--resume`               |

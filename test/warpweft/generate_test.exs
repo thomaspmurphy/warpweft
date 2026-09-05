@@ -130,6 +130,79 @@ defmodule Warpweft.GenerateTest do
     end
   end
 
+  describe "streaming via :on_token" do
+    # Byte-level tokens can end mid-codepoint, so a naive streamer would
+    # print replacement characters. Train on text full of multi-byte
+    # characters so the vocabulary is riddled with partial sequences.
+    setup do
+      corpus = String.duplicate("le café était très naïf — 日本語 🎉 ", 20)
+      bpe = BPE.train(corpus, 300)
+      # Highly repetitive corpora run out of pairs before reaching the
+      # requested size, so take the vocabulary the tokenizer actually has.
+      cfg = %{@tiny | vocab_size: BPE.vocab_size(bpe)}
+      %{bpe: bpe, cfg: cfg, params: Model.init(cfg, Nx.Random.key(0))}
+    end
+
+    test "every emitted chunk is valid UTF-8", %{bpe: bpe, cfg: cfg, params: params} do
+      for seed <- 1..10 do
+        {:ok, agent} = Agent.start_link(fn -> [] end)
+
+        Generate.generate(params, bpe, cfg, "le",
+          max_new_tokens: 20,
+          seed: seed,
+          on_token: fn chunk -> Agent.update(agent, &[chunk | &1]) end
+        )
+
+        chunks = agent |> Agent.get(&Enum.reverse/1)
+        Agent.stop(agent)
+
+        # This also proves the hold-back works: had a multi-byte character
+        # been split across two chunks, the first would end in a lone lead
+        # byte and fail validity here.
+        for chunk <- chunks do
+          assert String.valid?(chunk), "invalid UTF-8 chunk #{inspect(chunk)} at seed #{seed}"
+        end
+      end
+    end
+
+    # The base alphabet is all 256 bytes whatever the corpus, so a randomly
+    # initialized model emits malformed sequences constantly and the stream
+    # deliberately substitutes U+FFFD for them. Byte-exact equality with
+    # the return value therefore cannot hold in general. What must hold is
+    # that streaming loses, duplicates and reorders nothing — so compare
+    # against the return value put through the same substitution. Keeping
+    # that policy written out here means changing it in the implementation
+    # will fail this test, which is the point.
+    defp scrub(bin) do
+      case :unicode.characters_to_binary(bin) do
+        valid when is_binary(valid) -> valid
+        {:incomplete, valid, _rest} -> valid <> "�"
+        {:error, valid, <<_bad, rest::binary>>} -> valid <> "�" <> scrub(rest)
+      end
+    end
+
+    for cache <- [true, false] do
+      test "streaming loses nothing (cache=#{cache})", %{bpe: bpe, cfg: cfg, params: params} do
+        for seed <- 1..5 do
+          {:ok, agent} = Agent.start_link(fn -> [] end)
+
+          text =
+            Generate.generate(params, bpe, cfg, "le café",
+              max_new_tokens: 30,
+              seed: seed,
+              cache: unquote(cache),
+              on_token: fn chunk -> Agent.update(agent, &[chunk | &1]) end
+            )
+
+          streamed = agent |> Agent.get(&Enum.reverse/1) |> IO.iodata_to_binary()
+          Agent.stop(agent)
+
+          assert "le café" <> streamed == scrub(text), "mismatch at seed #{seed}"
+        end
+      end
+    end
+  end
+
   test "end-to-end generate round-trips through the tokenizer" do
     corpus = String.duplicate("all the world is a stage and all the men and women merely players. ", 5)
     bpe = BPE.train(corpus, 280)
