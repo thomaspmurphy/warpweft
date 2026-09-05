@@ -23,7 +23,7 @@ defmodule Warpweft.Model.Layers do
     |> Nx.add(beta)
   end
 
-  @doc "RMSNorm over the last axis: gamma * x / sqrt(mean(x^2) + eps). No re-centering."
+  @doc "RMSNorm over the last axis: gamma * x / sqrt(mean(x^2) + eps). No re-centring."
   def rms_norm(x, %{"gamma" => gamma}) do
     ms = x |> Nx.pow(2) |> Nx.mean(axes: [-1], keep_axes: true)
 

@@ -82,7 +82,7 @@ defmodule Warpweft.Model.Attention do
 
   This is the whole point of a KV cache. In the full forward pass, every
   generated token recomputes the keys and values for all preceding
-  positions, even though they cannot have changed — the causal mask means
+  positions, even though they cannot have changed: the causal mask means
   position `p`'s key and value depend only on tokens up to `p`. Caching
   them turns the per-token cost from O(context) projections and an
   O(context^2) score matrix into one projection and an O(context) score

@@ -2,16 +2,25 @@ defmodule Warpweft.Generate do
   @moduledoc """
   Fast autoregressive sampling.
 
-  The whole per-token computation — forward pass, temperature, top-k
-  masking, Gumbel-max sampling — is one jitted function over a
-  *fixed-shape* `{1, block_size}` buffer, so XLA compiles it exactly once
-  and every subsequent token reuses the compiled program. Running the
-  forward pass on a growing sequence instead would force a fresh
-  compilation at every length.
+  There are two strategies here, and `generate/5` picks between them.
 
-  The context buffer is right-padded with zeros and tracked by a scalar
-  `len`. The causal mask guarantees positions >= len cannot influence the
-  logits at `len - 1`, so the padding is mathematically invisible.
+  **KV cache (the default).** Each token runs a single position through
+  the network, reading every earlier position's keys and values from a
+  cache instead of recomputing them. See `Warpweft.Model.Decode`. This is
+  roughly seven times faster than recomputing, but it cannot slide its
+  context window, so it only applies while prompt plus generated tokens
+  fit in `block_size`.
+
+  **Fixed-shape recompute (the fallback).** Beyond that limit, the context
+  lives in a right-padded `{1, block_size}` buffer tracked by a scalar
+  `len`, and the whole forward pass reruns each token. The buffer keeps a
+  constant shape so XLA compiles the step exactly once; running the
+  forward pass on a growing sequence instead would force a fresh
+  compilation at every length. The causal mask guarantees positions at or
+  beyond `len` cannot influence the logits at `len - 1`, which is what
+  makes the padding invisible.
+
+  Both paths produce identical output for the same seed.
 
   Sampling uses the Gumbel-max trick: `argmax(logits / temp + gumbel_noise)`
   is an exact sample from `softmax(logits / temp)`, fully batched, with no
@@ -25,8 +34,17 @@ defmodule Warpweft.Generate do
   @doc """
   Generates text from a run directory.
 
-  Options: `:max_new_tokens` (200), `:temperature` (0.8), `:top_k` (50,
-  `nil` disables), `:seed` (1337), `:stop_at_eot` (true).
+  Options:
+
+    * `:max_new_tokens` (200)
+    * `:temperature` (0.8), must be greater than zero
+    * `:top_k` (50), `nil` disables
+    * `:seed` (1337)
+    * `:stop_at_eot` (true), halt on the end-of-text token
+    * `:cache` (true), set false to force the recomputing path
+    * `:on_token` (nil), a function called with each chunk of text as it
+      is generated. It always receives valid UTF-8, so a token ending
+      mid-character is held back until the next one completes it.
   """
   def from_run(run_dir, prompt, opts \\ []) do
     {params, config} = Checkpoint.load_run(run_dir)
@@ -39,7 +57,7 @@ defmodule Warpweft.Generate do
 
   Uses the KV-cache path when the prompt plus the requested tokens fit in
   `block_size`, and the recomputing path otherwise (the cache cannot slide
-  its window — see `Warpweft.Model.Decode`). Both paths produce identical
+  its window; see `Warpweft.Model.Decode`). Both paths produce identical
   output for the same seed, since the cached logits match the full forward
   pass and the sampling stream is the same. Pass `cache: false` to force
   the recomputing path.

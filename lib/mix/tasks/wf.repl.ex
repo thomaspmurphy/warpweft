@@ -148,7 +148,7 @@ defmodule Mix.Tasks.Wf.Repl do
         put_number(state, :seed, value, fn _ -> true end)
 
       other ->
-        IO.puts("unknown command #{inspect(other)} — try /help")
+        IO.puts("unknown command #{inspect(other)}, try /help")
         state
     end
   end

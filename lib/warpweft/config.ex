@@ -3,7 +3,7 @@ defmodule Warpweft.Config do
   Model and training hyperparameters, presets, and run-directory persistence.
 
   Architecture variants are plain atoms resolved at trace time, so every
-  combination compiles to its own specialized XLA program:
+  combination compiles to its own specialised XLA program:
 
     * `:pos`  - `:rope` or `:learned`
     * `:norm` - `:rms_norm` or `:layer_norm`
@@ -41,7 +41,7 @@ defmodule Warpweft.Config do
 
     # Deliberately identical to shakespeare_small apart from the corpus and
     # the vocabulary it forces, so the two runs isolate the effect of
-    # training data volume (410K vs 5.1M tokens) on the generalization gap.
+    # training data volume (410K vs 5.1M tokens) on the generalisation gap.
     "tinystories_small" => %{
       corpus: "tinystories",
       vocab_size: 4096

@@ -24,7 +24,7 @@ defmodule Warpweft.Tokenizer.BPE do
   @chunk_regex ~r/ ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+/u
 
   # Slices are small enough that their chunk lists die young rather than
-  # being promoted, and large enough to amortize the per-slice overhead.
+  # being promoted, and large enough to amortise the per-slice overhead.
   @slice_target 65_536
 
   @doc """
@@ -112,7 +112,7 @@ defmodule Warpweft.Tokenizer.BPE do
   Encodes `text` into a list of token ids.
 
   Special tokens present in the text are emitted as their dedicated ids.
-  Repeated chunks are memoized, so encoding a full corpus costs roughly
+  Repeated chunks are memoised, so encoding a full corpus costs roughly
   one merge-application per *unique* chunk.
   """
   def encode(%__MODULE__{} = bpe, text) do
@@ -172,14 +172,14 @@ defmodule Warpweft.Tokenizer.BPE do
   This is the step before BPE proper: text is cut into words, numbers,
   punctuation runs and whitespace runs, and merges are only ever learned
   or applied *within* a unit. `@chunk_regex` is the specification of that
-  split; everything below is an optimization that must agree with it
+  split; everything below is an optimisation that must agree with it
   byte-for-byte (see the differential test in `bpe_test.exs`).
 
   Three things make this fast:
 
     * the input is cut into slices at safe boundaries, so the
       intermediate lists stay small and short-lived rather than
-      materializing every chunk in the corpus at once
+      materialising every chunk in the corpus at once
     * pure-ASCII slices (the vast majority of real text) are scanned by
       binary pattern matching, ~7x faster than the regex
     * only slices containing non-ASCII codepoints pay for the regex,
@@ -274,7 +274,7 @@ defmodule Warpweft.Tokenizer.BPE do
   # Scans a slice with binary pattern matching, which handles ASCII only.
   # Real text is >99% ASCII but non-ASCII tends to be sprinkled throughout
   # it, so a run containing any byte >= 128 escapes to the regex on its own
-  # — just far enough to reach the next boundary no chunk can straddle —
+  # (just far enough to reach the next boundary no chunk can straddle)
   # and then the fast path resumes. Escaping the whole slice instead would
   # mean a single curly quote taxes the other 64 KB around it.
   #

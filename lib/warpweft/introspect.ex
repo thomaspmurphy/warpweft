@@ -4,8 +4,8 @@ defmodule Warpweft.Introspect do
 
   Attention weights are a `{batch, head, query, key}` tensor where each
   query row is a probability distribution over the positions it is allowed
-  to see. Rather than eyeballing grids, this summarizes each head with a
-  few statistics that distinguish the patterns heads reliably specialize
+  to see. Rather than eyeballing grids, this summarises each head with a
+  few statistics that distinguish the patterns heads reliably specialise
   into:
 
     * **previous-token** - mass concentrated one step back, the head that
@@ -20,7 +20,7 @@ defmodule Warpweft.Introspect do
     * **self** - mass on the current position, passing the token's own
       representation through
     * **distance** - how far back the head looks on average
-    * **entropy** - normalized against a uniform distribution over the
+    * **entropy** - normalised against a uniform distribution over the
       visible positions, so 0 is a sharp single-position lookup and 1 is
       "attend to everything equally"
   """
@@ -32,7 +32,7 @@ defmodule Warpweft.Introspect do
 
   @doc """
   Runs `prompt` through the model in `run_dir` and returns
-  `%{tokens: [...], stats: [...], weights: [...]}`.
+  `%{tokens: [...], stats: [...], weights: [...], config: %Warpweft.Config{}}`.
   """
   def analyze(run_dir, prompt) do
     {params, %Config{} = cfg} = Checkpoint.load_run(run_dir)

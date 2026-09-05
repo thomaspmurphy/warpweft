@@ -5,7 +5,7 @@ defmodule Warpweft.Model.Decode do
 
   `Warpweft.Model.forward/4` processes a whole sequence at once, which is
   what you want for training: every position's loss is computed in one
-  pass. For generation it is wasteful — to produce token `n + 1` it
+  pass. For generation it is wasteful: to produce token `n + 1` it
   recomputes everything about tokens `0..n`, which cannot have changed.
 
   `step/5` instead runs one token through the network, reading the
@@ -36,7 +36,7 @@ defmodule Warpweft.Model.Decode do
 
   @doc """
   Runs one token at absolute position `pos`, returning
-  `{logits, updated_cache}` where logits are `{1, vocab_size}` — the
+  `{logits, updated_cache}` where logits are `{1, vocab_size}`, the
   prediction for position `pos + 1`.
 
   `token` is `{1, 1}`; `pos` is a scalar tensor so the compiled program is

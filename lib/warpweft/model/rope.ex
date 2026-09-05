@@ -5,7 +5,7 @@ defmodule Warpweft.Model.RoPE do
   Instead of adding a learned position vector to the token embedding, RoPE
   rotates each (query, key) head vector by an angle proportional to its
   position. Dot products between rotated q and k then depend only on the
-  *relative* distance between positions, which generalizes better and adds
+  *relative* distance between positions, which generalises better and adds
   zero parameters.
   """
 

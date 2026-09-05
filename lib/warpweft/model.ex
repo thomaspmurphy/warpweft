@@ -1,6 +1,6 @@
 defmodule Warpweft.Model do
   @moduledoc """
-  The decoder-only transformer: parameter initialization and forward pass.
+  The decoder-only transformer: parameter initialisation and forward pass.
 
   Parameters live in a visible nested map (no framework graph):
 
@@ -17,7 +17,7 @@ defmodule Warpweft.Model do
   into a single fused XLA program. All architecture variants are decided
   at trace time from the config, so there is no runtime branching.
 
-  Initialization is normal(0, 0.02) everywhere, with the residual output
+  Initialisation is normal(0, 0.02) everywhere, with the residual output
   projections scaled down by 1/sqrt(2 * n_layer) so the residual stream
   variance stays stable with depth.
   """

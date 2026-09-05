@@ -1,6 +1,6 @@
 defmodule Warpweft do
   @moduledoc """
-  Warpweft — a decoder-only transformer ("GPT from scratch") built on
+  Warpweft: a decoder-only transformer ("GPT from scratch") built on
   Nx / EXLA, with a from-scratch byte-level BPE tokenizer.
 
   Typical workflow:
