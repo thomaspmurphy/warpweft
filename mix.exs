@@ -12,7 +12,15 @@ defmodule Warpweft.MixProject do
           "swappable architecture variants.",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      docs: docs()
+      docs: docs(),
+      package: package()
+    ]
+  end
+
+  defp package do
+    [
+      licenses: ["MIT"],
+      files: ~w(lib scripts test/fixtures mix.exs mix.lock README.md LICENSE docs .formatter.exs)
     ]
   end
 
@@ -24,7 +32,8 @@ defmodule Warpweft.MixProject do
         "docs/ARCHITECTURE.md",
         "docs/CONCEPTS.md",
         "docs/TECHNIQUES.md",
-        "docs/FINDINGS.md"
+        "docs/FINDINGS.md",
+        "LICENSE"
       ]
     ]
   end

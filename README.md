@@ -300,6 +300,10 @@ The architecture is task-agnostic: only the tokenizer and data change.
 - Further open questions are collected at the end of
   [docs/FINDINGS.md](docs/FINDINGS.md)
 
+## Licence
+
+MIT, see [LICENSE](LICENSE).
+
 ## Corpora
 
 `mix wf.data` downloads from third parties rather than vendoring anything.
