@@ -38,7 +38,10 @@ defmodule Mix.Tasks.Wf.Tokenizer.Train do
     specials = Corpus.special_tokens(corpus)
 
     IO.puts("training BPE: vocab=#{vocab} on #{byte_size(train_text)} bytes ...")
-    {us, bpe} = :timer.tc(fn -> BPE.train(train_text, vocab, special_tokens: specials, log_every: 100) end)
+
+    {us, bpe} =
+      :timer.tc(fn -> BPE.train(train_text, vocab, special_tokens: specials, log_every: 100) end)
+
     IO.puts("trained #{length(bpe.merges)} merges in #{Float.round(us / 1_000_000, 1)}s")
 
     # Name everything after the vocabulary actually achieved, not the one

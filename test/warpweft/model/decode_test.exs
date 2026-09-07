@@ -21,7 +21,13 @@ defmodule Warpweft.Model.DecodeTest do
       |> Enum.with_index()
       |> Enum.reduce({[], Decode.init_cache(cfg)}, fn {id, pos}, {acc, cache} ->
         {l, cache} =
-          Decode.step(params, Nx.tensor([[id]], type: :s32), cache, Nx.tensor(pos, type: :s32), cfg)
+          Decode.step(
+            params,
+            Nx.tensor([[id]], type: :s32),
+            cache,
+            Nx.tensor(pos, type: :s32),
+            cfg
+          )
 
         {[l | acc], cache}
       end)
@@ -53,8 +59,11 @@ defmodule Warpweft.Model.DecodeTest do
     params = Model.init(cfg, Nx.Random.key(0))
     cache = Decode.init_cache(cfg)
 
-    {_l, cache} = Decode.step(params, Nx.tensor([[5]], type: :s32), cache, Nx.tensor(0, type: :s32), cfg)
-    {_l, cache} = Decode.step(params, Nx.tensor([[9]], type: :s32), cache, Nx.tensor(1, type: :s32), cfg)
+    {_l, cache} =
+      Decode.step(params, Nx.tensor([[5]], type: :s32), cache, Nx.tensor(0, type: :s32), cfg)
+
+    {_l, cache} =
+      Decode.step(params, Nx.tensor([[9]], type: :s32), cache, Nx.tensor(1, type: :s32), cfg)
 
     k = cache["0"]["k"]
     assert Nx.shape(k) == {1, cfg.n_head, cfg.block_size, Config.head_dim(cfg)}

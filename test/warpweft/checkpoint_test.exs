@@ -35,7 +35,9 @@ defmodule Warpweft.CheckpointTest do
     # Adam's moment estimates and the step count it bases bias correction on.
     {a, _} = update.(grad, opt_state, params)
     {b, _} = update.(grad, loaded["opt_state"], params)
-    assert Nx.all_close(a["wte"]["kernel"], b["wte"]["kernel"], atol: 1.0e-6) |> Nx.to_number() == 1
+
+    assert Nx.all_close(a["wte"]["kernel"], b["wte"]["kernel"], atol: 1.0e-6) |> Nx.to_number() ==
+             1
   end
 
   defp scale_leaves(%Nx.Tensor{} = t), do: Nx.multiply(Nx.broadcast(0.01, Nx.shape(t)), 1.0)

@@ -22,7 +22,9 @@ defmodule Warpweft.ModelTest do
   end
 
   defp random_tokens(cfg, b, t, seed) do
-    {tokens, _} = Nx.Random.randint(Nx.Random.key(seed), 0, cfg.vocab_size, shape: {b, t}, type: :s32)
+    {tokens, _} =
+      Nx.Random.randint(Nx.Random.key(seed), 0, cfg.vocab_size, shape: {b, t}, type: :s32)
+
     tokens
   end
 
@@ -62,7 +64,10 @@ defmodule Warpweft.ModelTest do
         cut = div(t, 2)
 
         a = random_tokens(cfg, 2, t, 42)
-        {suffix, _} = Nx.Random.randint(Nx.Random.key(99), 0, cfg.vocab_size, shape: {2, t - cut}, type: :s32)
+
+        {suffix, _} =
+          Nx.Random.randint(Nx.Random.key(99), 0, cfg.vocab_size, shape: {2, t - cut}, type: :s32)
+
         b = Nx.put_slice(a, [0, cut], suffix)
 
         # Sanity: the two inputs really differ after the cut.
@@ -75,7 +80,8 @@ defmodule Warpweft.ModelTest do
                  Nx.slice_along_axis(logits_a, 0, cut, axis: 1),
                  Nx.slice_along_axis(logits_b, 0, cut, axis: 1),
                  atol: 1.0e-5
-               ) |> Nx.to_number() == 1
+               )
+               |> Nx.to_number() == 1
       end
     end
   end
@@ -88,8 +94,18 @@ defmodule Warpweft.ModelTest do
     k1 = Nx.Random.key(1)
     k2 = Nx.Random.key(2)
 
-    same = Nx.all_close(Model.forward(params, tokens, cfg, key: k1), Model.forward(params, tokens, cfg, key: k1))
-    diff = Nx.all_close(Model.forward(params, tokens, cfg, key: k1), Model.forward(params, tokens, cfg, key: k2))
+    same =
+      Nx.all_close(
+        Model.forward(params, tokens, cfg, key: k1),
+        Model.forward(params, tokens, cfg, key: k1)
+      )
+
+    diff =
+      Nx.all_close(
+        Model.forward(params, tokens, cfg, key: k1),
+        Model.forward(params, tokens, cfg, key: k2)
+      )
+
     infer = Nx.all_close(Model.forward(params, tokens, cfg), Model.forward(params, tokens, cfg))
 
     assert Nx.to_number(same) == 1

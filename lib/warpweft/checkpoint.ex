@@ -30,7 +30,8 @@ defmodule Warpweft.Checkpoint do
     if File.exists?(candidate), do: unique_dir(base, n + 1), else: candidate
   end
 
-  def tokenizer_dir(run_dir), do: run_dir |> Path.join("tokenizer.txt") |> File.read!() |> String.trim()
+  def tokenizer_dir(run_dir),
+    do: run_dir |> Path.join("tokenizer.txt") |> File.read!() |> String.trim()
 
   def save_latest(run_dir, params, opt_state, step) do
     # Nx.serialize handles containers of tensors, so scalars ride along as 0-d tensors.

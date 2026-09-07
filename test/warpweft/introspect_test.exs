@@ -14,7 +14,10 @@ defmodule Warpweft.IntrospectTest do
 
   defp weights_for(cfg) do
     params = Model.init(cfg, Nx.Random.key(0))
-    {tokens, _} = Nx.Random.randint(Nx.Random.key(1), 0, cfg.vocab_size, shape: {1, 8}, type: :s32)
+
+    {tokens, _} =
+      Nx.Random.randint(Nx.Random.key(1), 0, cfg.vocab_size, shape: {1, 8}, type: :s32)
+
     {logits, weights} = Model.forward(params, tokens, cfg, collect_attention: true)
     {logits, weights}
   end
@@ -43,7 +46,9 @@ defmodule Warpweft.IntrospectTest do
     for w <- weights do
       # every query row sums to 1
       sums = Nx.sum(w, axes: [-1])
-      assert Nx.all_close(sums, Nx.broadcast(1.0, Nx.shape(sums)), atol: 1.0e-5) |> Nx.to_number() == 1
+
+      assert Nx.all_close(sums, Nx.broadcast(1.0, Nx.shape(sums)), atol: 1.0e-5) |> Nx.to_number() ==
+               1
 
       # nothing is negative
       assert Nx.to_number(Nx.reduce_min(w)) >= 0.0

@@ -7,12 +7,14 @@ defmodule Warpweft.Data.Corpus do
 
   @corpora %{
     "shakespeare" => %{
-      url: "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt",
+      url:
+        "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt",
       min_bytes: 1_000_000,
       special_tokens: []
     },
     "tinystories" => %{
-      url: "https://huggingface.co/datasets/roneneldan/TinyStories/resolve/main/TinyStoriesV2-GPT4-valid.txt",
+      url:
+        "https://huggingface.co/datasets/roneneldan/TinyStories/resolve/main/TinyStoriesV2-GPT4-valid.txt",
       min_bytes: 20_000_000,
       special_tokens: ["<|endoftext|>"]
     }
@@ -37,6 +39,7 @@ defmodule Warpweft.Data.Corpus do
     else
       File.mkdir_p!(@raw_dir)
       IO.puts("#{name}: downloading #{spec.url}")
+
       body =
         case Req.get(spec.url, receive_timeout: 300_000, decode_body: false) do
           {:ok, %{status: 200, body: body}} ->
@@ -63,6 +66,7 @@ defmodule Warpweft.Data.Corpus do
   def read!(name), do: name |> fetch() |> File.read!()
 
   defp fetch_spec!(name) do
-    Map.get(@corpora, name) || raise ArgumentError, "unknown corpus #{inspect(name)}; known: #{inspect(names())}"
+    Map.get(@corpora, name) ||
+      raise ArgumentError, "unknown corpus #{inspect(name)}; known: #{inspect(names())}"
   end
 end

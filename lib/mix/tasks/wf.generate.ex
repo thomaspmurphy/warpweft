@@ -16,7 +16,14 @@ defmodule Mix.Tasks.Wf.Generate do
   def run(argv) do
     {opts, _, _} =
       OptionParser.parse(argv,
-        strict: [run: :string, prompt: :string, n: :integer, temp: :float, top_k: :integer, seed: :integer],
+        strict: [
+          run: :string,
+          prompt: :string,
+          n: :integer,
+          temp: :float,
+          top_k: :integer,
+          seed: :integer
+        ],
         aliases: [n: :n]
       )
 
@@ -42,5 +49,4 @@ defmodule Mix.Tasks.Wf.Generate do
     IO.puts(text)
     IO.puts("\n--- #{run_dir}, #{Float.round(us / 1_000_000, 1)}s (incl. compilation)")
   end
-
 end

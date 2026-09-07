@@ -47,7 +47,8 @@ defmodule Warpweft.Tokenizer.BPE do
     n_merges = vocab_size - @byte_alphabet_size - length(special_tokens)
 
     if n_merges < 0 do
-      raise ArgumentError, "vocab_size must be at least #{@byte_alphabet_size + length(special_tokens)}"
+      raise ArgumentError,
+            "vocab_size must be at least #{@byte_alphabet_size + length(special_tokens)}"
     end
 
     chunk_freqs =
@@ -379,7 +380,9 @@ defmodule Warpweft.Tokenizer.BPE do
 
   defp count_pairs(_short, _freq, counts), do: counts
 
-  defp merge_pair([l, r | rest], {l, r} = pair, new_id), do: [new_id | merge_pair(rest, pair, new_id)]
+  defp merge_pair([l, r | rest], {l, r} = pair, new_id),
+    do: [new_id | merge_pair(rest, pair, new_id)]
+
   defp merge_pair([x | rest], pair, new_id), do: [x | merge_pair(rest, pair, new_id)]
   defp merge_pair([], _pair, _new_id), do: []
 

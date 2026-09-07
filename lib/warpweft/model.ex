@@ -79,7 +79,8 @@ defmodule Warpweft.Model do
           {w3, key} = normal(key, {d, h}, @init_std)
           {w2, key} = normal(key, {h, d}, resid_std)
 
-          {%{"w1" => %{"kernel" => w1}, "w2" => %{"kernel" => w2}, "w3" => %{"kernel" => w3}}, key}
+          {%{"w1" => %{"kernel" => w1}, "w2" => %{"kernel" => w2}, "w3" => %{"kernel" => w3}},
+           key}
       end
 
     block = %{
@@ -150,7 +151,11 @@ defmodule Warpweft.Model do
         {attn_out, attns} =
           if collect do
             {out, weights} =
-              Attention.self_attention(attn_in, block["attn"], [return_weights: true] ++ attn_opts)
+              Attention.self_attention(
+                attn_in,
+                block["attn"],
+                [return_weights: true] ++ attn_opts
+              )
 
             {out, [weights | attns]}
           else

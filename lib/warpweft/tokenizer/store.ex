@@ -22,7 +22,10 @@ defmodule Warpweft.Tokenizer.Store do
 
     meta = %{
       "vocab_size" => BPE.vocab_size(bpe),
-      "special_tokens" => bpe.special_tokens |> Enum.sort_by(fn {_tok, id} -> id end) |> Enum.map(fn {tok, _id} -> tok end)
+      "special_tokens" =>
+        bpe.special_tokens
+        |> Enum.sort_by(fn {_tok, id} -> id end)
+        |> Enum.map(fn {tok, _id} -> tok end)
     }
 
     File.write!(Path.join(dir, "meta.json"), JSON.encode!(meta))

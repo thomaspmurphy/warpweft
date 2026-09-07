@@ -21,7 +21,13 @@ defmodule Mix.Tasks.Wf.Attention do
   def run(argv) do
     {opts, _, _} =
       OptionParser.parse(argv,
-        strict: [run: :string, prompt: :string, layer: :integer, head: :integer, heatmaps: :boolean]
+        strict: [
+          run: :string,
+          prompt: :string,
+          layer: :integer,
+          head: :integer,
+          heatmaps: :boolean
+        ]
       )
 
     Mix.Task.run("app.start")

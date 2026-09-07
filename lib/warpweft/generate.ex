@@ -81,7 +81,16 @@ defmodule Warpweft.Generate do
       if use_cache do
         cached_loop(params, prompt_ids, cfg, max_new_tokens, seed, eot, opts)
       else
-        sample_loop(build_step(cfg, opts), params, prompt_ids, cfg, max_new_tokens, seed, eot, opts)
+        sample_loop(
+          build_step(cfg, opts),
+          params,
+          prompt_ids,
+          cfg,
+          max_new_tokens,
+          seed,
+          eot,
+          opts
+        )
       end
 
     prompt <> BPE.decode(bpe, new_ids)
@@ -155,7 +164,8 @@ defmodule Warpweft.Generate do
   def build_cached_fns(%Config{} = cfg, opts \\ []) do
     top_k = Keyword.get(opts, :top_k, 50)
 
-    decode = Nx.Defn.jit(fn params, token, cache, pos -> Decode.step(params, token, cache, pos, cfg) end)
+    decode =
+      Nx.Defn.jit(fn params, token, cache, pos -> Decode.step(params, token, cache, pos, cfg) end)
 
     # Temperature is a runtime argument so it can be changed without
     # recompiling; top-k cannot be, since `Nx.top_k` needs `k` to shape

@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.19"
+          otp-version: "27"
+
+      # EXLA compiles a sizeable native dependency, so cache both the Hex
+      # deps and the build directory.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
+          restore-keys: ${{ runner.os }}-mix-
+
+      - run: mix deps.get
+
+      - run: mix format --check-formatted
+
+      - run: mix compile --warnings-as-errors
+
+      - run: mix hex.audit
+
+      # The slow tag covers the overfit-a-single-batch check, which is the
+      # end-to-end proof that gradients flow, so it is worth the extra
+      # couple of seconds in CI.
+      - run: mix test --include slow

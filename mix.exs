@@ -6,8 +6,26 @@ defmodule Warpweft.MixProject do
       app: :warpweft,
       version: "0.1.0",
       elixir: "~> 1.19",
+      description:
+        "A decoder-only transformer built from scratch in Elixir with Nx, " <>
+          "including a byte-level BPE tokenizer, KV-cache generation and " <>
+          "swappable architecture variants.",
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      docs: docs()
+    ]
+  end
+
+  defp docs do
+    [
+      main: "readme",
+      extras: [
+        "README.md",
+        "docs/ARCHITECTURE.md",
+        "docs/CONCEPTS.md",
+        "docs/TECHNIQUES.md",
+        "docs/FINDINGS.md"
+      ]
     ]
   end
 

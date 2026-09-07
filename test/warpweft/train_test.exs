@@ -65,6 +65,7 @@ defmodule Warpweft.TrainTest do
     assert Nx.all_close(
              Model.forward(params, x, cfg),
              Model.forward(loaded["params"], x, cfg)
-           ) |> Nx.to_number() == 1
+           )
+           |> Nx.to_number() == 1
   end
 end

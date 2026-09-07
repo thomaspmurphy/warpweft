@@ -21,9 +21,22 @@ training step is four visible lines: forward, gradient, clip, update.
 Most of the techniques document has nothing to do with machine learning
 and transfers directly to ordinary software.
 
-## Try it
+## Getting started
 
-If a model has already been trained into `runs/`, this is the whole thing:
+Requires Elixir 1.19 or later and OTP 26 or later. Everything below runs
+on CPU, no GPU needed. The first `mix deps.get` pulls EXLA, which is a
+large download.
+
+```sh
+mix deps.get
+
+mix wf.data --corpus shakespeare                          # download the corpus
+mix wf.tokenizer.train --corpus shakespeare --vocab 1024  # ~6 seconds
+mix wf.train --preset shakespeare_small                   # ~15 minutes
+```
+
+That gives you a trained 3.5M-parameter model in `runs/<timestamp>/`.
+Then:
 
 ```sh
 mix wf.repl
@@ -58,21 +71,14 @@ Asking for more than `block_size` minus the prompt drops to the slower
 recomputing path, which is correct but about seven times slower per token
 and does recompile when temperature changes.
 
-## Quick start
+## Looking inside
+
+See one prompt traverse every stage of the model, with real shapes and
+real probabilities:
 
 ```sh
-mix deps.get
-
-mix wf.data --corpus shakespeare              # download corpus -> data/raw/
-mix wf.tokenizer.train --corpus shakespeare --vocab 1024
-                                              # train BPE + pre-tokenize -> data/tokenized/
-mix wf.train --preset shakespeare_small       # ~15 min on a modern CPU -> runs/<timestamp>/
-mix wf.generate --prompt "ROMEO:" -n 100      # sample from the latest run
+mix wf.explain --prompt "The cat sat on the"
 ```
-
-Training writes checkpoints as it goes, so an interrupted run can be
-picked up with `mix wf.train --resume runs/<timestamp>` (the directory
-argument is required).
 
 Inspect what the trained model's attention heads learned:
 
@@ -80,6 +86,11 @@ Inspect what the trained model's attention heads learned:
 mix wf.attention --prompt "First Citizen:"            # per-head statistics
 mix wf.attention --prompt "First Citizen:" --heatmaps # + shaded grids
 ```
+
+Training writes checkpoints as it goes, so an interrupted run can be
+picked up with `mix wf.train --resume runs/<timestamp>` (the directory
+argument is required). All three tools take `--run <dir>` to select a
+specific run rather than the newest.
 
 TinyStories (richer English, 22 MB corpus, vocab 4096):
 
@@ -288,3 +299,28 @@ The architecture is task-agnostic: only the tokenizer and data change.
 - **EMLX backend** (Apple Metal) once its training support matures
 - Further open questions are collected at the end of
   [docs/FINDINGS.md](docs/FINDINGS.md)
+
+## Corpora
+
+`mix wf.data` downloads from third parties rather than vendoring anything.
+Neither corpus is redistributed here, and neither is covered by this
+repository's licence.
+
+**tinyshakespeare** (1.1 MB) comes from
+[karpathy/char-rnn](https://github.com/karpathy/char-rnn), which is MIT
+licensed. The underlying text is public-domain Shakespeare.
+
+**TinyStories** comes from the
+[roneneldan/TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories)
+dataset, released under
+[CDLA-Sharing-1.0](https://cdla.dev/sharing-1-0/) and introduced in
+[*TinyStories: How Small Can Language Models Be and Still Speak Coherent
+English?*](https://arxiv.org/abs/2305.07759) (Eldan and Li, 2023). We use
+the validation split as a CPU-scale training corpus and carve our own
+validation split from it, which is deliberate and documented in
+[docs/FINDINGS.md](docs/FINDINGS.md).
+
+The rotary embedding implementation follows
+[*RoFormer*](https://arxiv.org/abs/2104.09864) (Su et al., 2021), and the
+BPE training procedure follows
+[Sennrich et al. (2016)](https://arxiv.org/abs/1508.07909).

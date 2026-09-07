@@ -48,7 +48,11 @@ defmodule Warpweft.Model.Decode do
     x =
       case cfg.pos do
         :learned ->
-          position = params["wpe"]["kernel"] |> Nx.take(Nx.reshape(pos, {1})) |> Nx.reshape({1, 1, cfg.d_model})
+          position =
+            params["wpe"]["kernel"]
+            |> Nx.take(Nx.reshape(pos, {1}))
+            |> Nx.reshape({1, 1, cfg.d_model})
+
           Nx.add(x, position)
 
         :rope ->

@@ -15,7 +15,13 @@ defmodule Warpweft.OptimizerTest do
 
   defp cfg(overrides \\ []) do
     struct!(
-      %Config{peak_lr: 1.0, warmup_steps: 10, total_steps: 100, min_lr_ratio: 0.1, weight_decay: 0.0},
+      %Config{
+        peak_lr: 1.0,
+        warmup_steps: 10,
+        total_steps: 100,
+        min_lr_ratio: 0.1,
+        weight_decay: 0.0
+      },
       overrides
     )
   end

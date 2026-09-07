@@ -25,7 +25,9 @@ defmodule Warpweft.GenerateTest do
         {prefix, _} = Nx.Random.randint(Nx.Random.key(1), 0, 64, shape: {1, len}, type: :s32)
 
         pad_zeros = Nx.broadcast(Nx.tensor(0, type: :s32), {1, cfg.block_size - len})
-        {pad_junk, _} = Nx.Random.randint(Nx.Random.key(2), 0, 64, shape: {1, cfg.block_size - len}, type: :s32)
+
+        {pad_junk, _} =
+          Nx.Random.randint(Nx.Random.key(2), 0, 64, shape: {1, cfg.block_size - len}, type: :s32)
 
         a = Nx.concatenate([prefix, pad_zeros], axis: 1)
         b = Nx.concatenate([prefix, pad_junk], axis: 1)
@@ -124,13 +126,19 @@ defmodule Warpweft.GenerateTest do
 
   describe "KV cache" do
     setup do
-      corpus = String.duplicate("all the world is a stage and all the men and women merely players. ", 5)
+      corpus =
+        String.duplicate("all the world is a stage and all the men and women merely players. ", 5)
+
       bpe = BPE.train(corpus, 280)
       cfg = %{@tiny | vocab_size: 280}
       %{bpe: bpe, cfg: cfg, params: Model.init(cfg, Nx.Random.key(0))}
     end
 
-    test "cached and recomputing paths generate identical text", %{bpe: bpe, cfg: cfg, params: params} do
+    test "cached and recomputing paths generate identical text", %{
+      bpe: bpe,
+      cfg: cfg,
+      params: params
+    } do
       for seed <- [1, 2, 99], temp <- [0.8, 1.5], top_k <- [nil, 5] do
         opts = [max_new_tokens: 8, seed: seed, temperature: temp, top_k: top_k]
 
@@ -170,7 +178,9 @@ defmodule Warpweft.GenerateTest do
       assert length(BPE.encode(bpe, generated)) == n
 
       # And it still matches the recomputing path exactly.
-      plain = Generate.generate(params, bpe, cfg, prompt, max_new_tokens: n, cache: false, seed: 1)
+      plain =
+        Generate.generate(params, bpe, cfg, prompt, max_new_tokens: n, cache: false, seed: 1)
+
       assert text == plain
     end
   end
@@ -249,7 +259,9 @@ defmodule Warpweft.GenerateTest do
   end
 
   test "end-to-end generate round-trips through the tokenizer" do
-    corpus = String.duplicate("all the world is a stage and all the men and women merely players. ", 5)
+    corpus =
+      String.duplicate("all the world is a stage and all the men and women merely players. ", 5)
+
     bpe = BPE.train(corpus, 280)
     cfg = %{@tiny | vocab_size: 280}
     params = Model.init(cfg, Nx.Random.key(0))

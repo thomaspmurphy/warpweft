@@ -97,8 +97,11 @@ defmodule Warpweft.Config do
 
   def preset(name) do
     case Map.fetch(@presets, name) do
-      {:ok, overrides} -> struct!(__MODULE__, overrides)
-      :error -> raise ArgumentError, "unknown preset #{inspect(name)}; known: #{inspect(presets())}"
+      {:ok, overrides} ->
+        struct!(__MODULE__, overrides)
+
+      :error ->
+        raise ArgumentError, "unknown preset #{inspect(name)}; known: #{inspect(presets())}"
     end
   end
 

@@ -41,7 +41,8 @@ defmodule Warpweft.Introspect do
     ids = bpe |> BPE.encode(prompt) |> Enum.take(cfg.block_size)
 
     if ids == [] do
-      raise ArgumentError, "cannot analyse attention for an empty prompt: give some text to attend over"
+      raise ArgumentError,
+            "cannot analyse attention for an empty prompt: give some text to attend over"
     end
 
     tokens = Enum.map(ids, &BPE.decode(bpe, [&1]))
@@ -172,7 +173,8 @@ defmodule Warpweft.Introspect do
 
   defp check_bounds!(index, count, name) do
     unless is_integer(index) and index >= 0 and index < count do
-      raise ArgumentError, "#{name} #{inspect(index)} is out of range: this model has #{count} (0..#{count - 1})"
+      raise ArgumentError,
+            "#{name} #{inspect(index)} is out of range: this model has #{count} (0..#{count - 1})"
     end
   end
 

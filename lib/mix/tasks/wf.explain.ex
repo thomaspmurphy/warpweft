@@ -114,7 +114,11 @@ defmodule Mix.Tasks.Wf.Explain do
       "  project    {1, #{length(ids)}, #{cfg.d_model}} -> {1, #{length(ids)}, #{cfg.vocab_size}}"
     )
 
-    tied = if cfg.tie_embeddings, do: "reuses the embedding table, transposed", else: "a separate matrix"
+    tied =
+      if cfg.tie_embeddings,
+        do: "reuses the embedding table, transposed",
+        else: "a separate matrix"
+
     IO.puts("             ^ #{tied}")
     IO.puts("")
     IO.puts("  Every position predicts its own next token. That is why one forward")
@@ -166,7 +170,10 @@ defmodule Mix.Tasks.Wf.Explain do
 
       IO.puts(
         "    temperature #{temperature}  ->  #{distinct} distinct tokens in 12 draws: " <>
-          (draws |> Enum.uniq() |> Enum.take(5) |> Enum.map_join(" ", &inspect(BPE.decode(bpe, [&1]))))
+          (draws
+           |> Enum.uniq()
+           |> Enum.take(5)
+           |> Enum.map_join(" ", &inspect(BPE.decode(bpe, [&1]))))
       )
     end
 
