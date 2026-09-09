@@ -258,17 +258,23 @@ defmodule Warpweft.Generate do
         bpe = Keyword.fetch!(opts, :tokenizer)
 
         fn
-          pending, :flush ->
-            # Anything still pending is a truncated character.
-            if pending != "", do: fun.("�")
-            ""
-
-          pending, token ->
-            {ready, keep} = split_complete_utf8(pending <> BPE.decode(bpe, [token]))
-            if ready != "", do: fun.(ready)
-            keep
+          pending, :flush -> flush_pending(pending, fun)
+          pending, token -> emit_token(pending, token, bpe, fun)
         end
     end
+  end
+
+  defp flush_pending("", _fun), do: ""
+
+  defp flush_pending(_pending, fun) do
+    fun.("�")
+    ""
+  end
+
+  defp emit_token(pending, token, bpe, fun) do
+    {ready, keep} = split_complete_utf8(pending <> BPE.decode(bpe, [token]))
+    if ready != "", do: fun.(ready)
+    keep
   end
 
   # Splits into {emittable valid UTF-8, bytes that may yet be completed}.

@@ -73,9 +73,11 @@ defmodule Warpweft.Data.Dataset do
 
       paths ->
         sizes =
-          paths
-          |> Enum.map(&(&1 |> Path.basename(".meta.json") |> String.split("-") |> List.last()))
-          |> Enum.join(", ")
+          Enum.map_join(
+            paths,
+            ", ",
+            &(&1 |> Path.basename(".meta.json") |> String.split("-") |> List.last())
+          )
 
         "\nAlready tokenized at vocab size(s): #{sizes}."
     end

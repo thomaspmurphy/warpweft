@@ -131,19 +131,21 @@ defmodule Warpweft.Tokenizer.BPE do
           {[[bpe.special_tokens[tok]] | acc], memo}
 
         {:text, part}, {acc, memo} ->
-          reduce_chunks(part, {acc, memo}, fn chunk, {acc, memo} ->
-            case memo do
-              %{^chunk => ids} ->
-                {[ids | acc], memo}
-
-              _ ->
-                ids = chunk |> :binary.bin_to_list() |> apply_merges(bpe.ranks)
-                {[ids | acc], Map.put(memo, chunk, ids)}
-            end
-          end)
+          reduce_chunks(part, {acc, memo}, &encode_chunk(&1, &2, bpe.ranks))
       end)
 
     {acc |> Enum.reverse() |> List.flatten(), memo}
+  end
+
+  defp encode_chunk(chunk, {acc, memo}, ranks) do
+    case memo do
+      %{^chunk => ids} ->
+        {[ids | acc], memo}
+
+      _ ->
+        ids = chunk |> :binary.bin_to_list() |> apply_merges(ranks)
+        {[ids | acc], Map.put(memo, chunk, ids)}
+    end
   end
 
   @doc "Decodes a list of token ids back into a binary."
@@ -353,16 +355,26 @@ defmodule Warpweft.Tokenizer.BPE do
           {:halt, {chunks, merges}}
 
         {pair, count} ->
-          if log_every && rem(rank, log_every) == 0 do
-            IO.puts("merge #{rank}/#{n_merges}: #{inspect(pair)} (count #{count})")
-          end
-
+          log_merge(rank, n_merges, pair, count, log_every)
           new_id = @byte_alphabet_size + rank
-          chunks = Enum.map(chunks, fn {ids, freq} -> {merge_pair(ids, pair, new_id), freq} end)
-          {:cont, {chunks, [pair | merges]}}
+          {:cont, {apply_merge(chunks, pair, new_id), [pair | merges]}}
       end
     end)
     |> then(fn {_chunks, merges} -> Enum.reverse(merges) end)
+  end
+
+  defp apply_merge(chunks, pair, new_id) do
+    Enum.map(chunks, fn {ids, freq} -> {merge_pair(ids, pair, new_id), freq} end)
+  end
+
+  defp log_merge(_rank, _n_merges, _pair, _count, nil), do: :ok
+
+  defp log_merge(rank, n_merges, pair, count, log_every) do
+    if rem(rank, log_every) == 0 do
+      IO.puts("merge #{rank}/#{n_merges}: #{inspect(pair)} (count #{count})")
+    end
+
+    :ok
   end
 
   defp best_pair(chunks) do
@@ -401,9 +413,12 @@ defmodule Warpweft.Tokenizer.BPE do
     end
   end
 
-  defp lowest_rank_pair(ids, ranks) do
+  defp lowest_rank_pair([], _ranks), do: nil
+  defp lowest_rank_pair([_only], _ranks), do: nil
+
+  defp lowest_rank_pair([_ | tail] = ids, ranks) do
     ids
-    |> Enum.zip(tl(ids ++ [nil]))
+    |> Enum.zip(tail)
     |> Enum.flat_map(fn pair ->
       case ranks do
         %{^pair => rank_info} -> [{pair, rank_info}]
@@ -421,7 +436,7 @@ defmodule Warpweft.Tokenizer.BPE do
   defp split_on_specials(text, []), do: [{:text, text}]
 
   defp split_on_specials(text, specials) do
-    pattern = specials |> Enum.map(&Regex.escape/1) |> Enum.join("|")
+    pattern = Enum.map_join(specials, "|", &Regex.escape/1)
     regex = Regex.compile!("(#{pattern})")
 
     text

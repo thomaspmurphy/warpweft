@@ -109,42 +109,56 @@ defmodule Warpweft.Train do
       |> Stream.with_index(start_step + 1)
       |> Enum.reduce(initial, fn {{x, y, key}, step}, acc ->
         {loss, params, opt_state} = train_step.(acc.params, acc.opt_state, x, y, key)
-        acc = %{acc | params: params, opt_state: opt_state, window_steps: acc.window_steps + 1}
 
-        acc =
-          if rem(step, cfg.log_every) == 0 or step == cfg.total_steps do
-            loss = Nx.to_number(loss)
-            now = System.monotonic_time(:millisecond)
-            tok_s = acc.window_steps * tokens_per_step * 1000 / max(now - acc.window_start, 1)
-
-            IO.puts(
-              "step #{step}/#{cfg.total_steps}  loss #{Float.round(loss, 4)}  " <>
-                "#{round(tok_s)} tok/s"
-            )
-
-            %{acc | window_start: now, window_steps: 0}
-          else
-            acc
-          end
-
-        if rem(step, cfg.eval_every) == 0 or step == cfg.total_steps do
-          val_loss = evaluate(eval_step, params, val_data, cfg)
-          IO.puts("step #{step}  val_loss #{Float.round(val_loss, 4)}")
-          Checkpoint.save_latest(run_dir, params, opt_state, step)
-
-          if val_loss < acc.best_val do
-            Checkpoint.save_best(run_dir, params, val_loss)
-            %{acc | best_val: val_loss}
-          else
-            acc
-          end
-        else
-          acc
-        end
+        %{acc | params: params, opt_state: opt_state, window_steps: acc.window_steps + 1}
+        |> maybe_log(step, loss, tokens_per_step, cfg)
+        |> maybe_evaluate(step, eval_step, val_data, run_dir, cfg)
       end)
 
     {final.params, run_dir}
   end
+
+  defp maybe_log(acc, step, loss, tokens_per_step, cfg) do
+    if due?(step, cfg.log_every, cfg) do
+      now = System.monotonic_time(:millisecond)
+      elapsed = max(now - acc.window_start, 1)
+      tok_s = acc.window_steps * tokens_per_step * 1000 / elapsed
+
+      IO.puts(
+        "step #{step}/#{cfg.total_steps}  " <>
+          "loss #{Float.round(Nx.to_number(loss), 4)}  #{round(tok_s)} tok/s"
+      )
+
+      %{acc | window_start: now, window_steps: 0}
+    else
+      acc
+    end
+  end
+
+  defp maybe_evaluate(acc, step, eval_step, val_data, run_dir, cfg) do
+    if due?(step, cfg.eval_every, cfg) do
+      val_loss = evaluate(eval_step, acc.params, val_data, cfg)
+      IO.puts("step #{step}  val_loss #{Float.round(val_loss, 4)}")
+      Checkpoint.save_latest(run_dir, acc.params, acc.opt_state, step)
+      record_best(acc, val_loss, run_dir)
+    else
+      acc
+    end
+  end
+
+  defp record_best(acc, val_loss, run_dir) do
+    if improved?(val_loss, acc.best_val) do
+      Checkpoint.save_best(run_dir, acc.params, val_loss)
+      %{acc | best_val: val_loss}
+    else
+      acc
+    end
+  end
+
+  defp improved?(_val_loss, :infinity), do: true
+  defp improved?(val_loss, best), do: val_loss < best
+
+  defp due?(step, every, cfg), do: rem(step, every) == 0 or step == cfg.total_steps
 
   @doc """
   Converts a loss in nats per token into bits per byte.
@@ -168,10 +182,11 @@ defmodule Warpweft.Train do
       raise ArgumentError, "eval_batches must be at least 1, got #{cfg.eval_batches}"
     end
 
-    Batches.stream(val_data, cfg.seed + 7919, cfg.batch_size, cfg.block_size)
-    |> Stream.take(cfg.eval_batches)
-    |> Enum.map(fn {x, y, _key} -> eval_step.(params, x, y) end)
-    |> Enum.map(&Nx.to_number/1)
-    |> then(&(Enum.sum(&1) / length(&1)))
+    losses =
+      Batches.stream(val_data, cfg.seed + 7919, cfg.batch_size, cfg.block_size)
+      |> Stream.take(cfg.eval_batches)
+      |> Enum.map(fn {x, y, _key} -> Nx.to_number(eval_step.(params, x, y)) end)
+
+    Enum.sum(losses) / length(losses)
   end
 end

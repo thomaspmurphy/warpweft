@@ -114,43 +114,55 @@ defmodule Mix.Tasks.Wf.Repl do
 
   defp handle_command(state, command) do
     case String.split(command, " ", parts: 2) do
-      ["help"] ->
-        IO.puts("""
-          /temp 1.0      sampling temperature (higher = more random)
-          /n 200         how many tokens to generate
-          /top-k 50      keep only the k most likely tokens (0 disables)
-          /seed 42       fix the seed, or /seed random
-          /settings      show current settings
-          /quit
-        Anything else is used as a prompt.\
-        """)
-
-        state
-
-      ["settings"] ->
-        IO.inspect(state.settings, label: "settings")
-        state
-
-      ["temp", value] ->
-        put_number(state, :temperature, value, &(&1 > 0))
-
-      ["n", value] ->
-        put_number(state, :n, value, &(&1 > 0))
-
-      ["top-k", value] ->
-        put_number(state, :top_k, value, &(&1 >= 0))
-
-      ["seed", "random"] ->
-        IO.puts("seed: random")
-        put_in(state.settings.seed, :random)
-
-      ["seed", value] ->
-        put_number(state, :seed, value, fn _ -> true end)
-
-      other ->
-        IO.puts("unknown command #{inspect(other)}, try /help")
-        state
+      ["help"] -> print_help(state)
+      ["settings"] -> print_settings(state)
+      [name, value] -> set(state, name, value)
+      _ -> unknown(state, command)
     end
+  end
+
+  defp print_help(state) do
+    IO.puts("""
+      /temp 1.0      sampling temperature (higher = more random)
+      /n 200         how many tokens to generate
+      /top-k 50      keep only the k most likely tokens (0 disables)
+      /seed 42       fix the seed, or /seed random
+      /settings      show current settings
+      /quit
+    Anything else is used as a prompt.\
+    """)
+
+    state
+  end
+
+  defp print_settings(state) do
+    s = state.settings
+
+    IO.puts("""
+      temperature #{s.temperature}
+      n           #{s.n}
+      top-k       #{if s.top_k == 0, do: "disabled", else: s.top_k}
+      seed        #{s.seed}\
+    """)
+
+    state
+  end
+
+  defp set(state, "temp", value), do: put_number(state, :temperature, value, &(&1 > 0))
+  defp set(state, "n", value), do: put_number(state, :n, value, &(&1 > 0))
+  defp set(state, "top-k", value), do: put_number(state, :top_k, value, &(&1 >= 0))
+
+  defp set(state, "seed", "random") do
+    IO.puts("seed: random")
+    put_in(state.settings.seed, :random)
+  end
+
+  defp set(state, "seed", value), do: put_number(state, :seed, value, fn _ -> true end)
+  defp set(state, name, _value), do: unknown(state, name)
+
+  defp unknown(state, command) do
+    IO.puts("unknown command #{inspect(command)}, try /help")
+    state
   end
 
   defp put_number(state, key, value, valid?) do
